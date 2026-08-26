@@ -38,13 +38,27 @@ npx @deepseek-ai/dsh web
 2. 幂等注册组合行到 `cordis.patch.yml`（自动备份，不覆盖其他插件）
 3. 调用 `setup.ps1`：创建 `.venv` + 安装 Python 依赖（faster-whisper + FunASR-ONNX，无 torch）+ 可选预下载模型
 
-## 网络要求（首次使用）
+## 环境要求
 
-- 首次安装需联网：pip 依赖 + 模型下载（whisper 0.1-3GB 按型号；FunASR 约 0.9GB）
-- **海外用户**若模型下载慢/失败：
-  - whisper 引擎：设置环境变量 `DSH_HF_ENDPOINT=https://huggingface.co`
-  - FunASR 引擎：设置环境变量 `MODELSCOPE_ENDPOINT`（默认走 modelscope.cn）
+**运行环境**
+- DSH 主程序（Node.js，随 dsh 安装）
+- 浏览器：Chrome / Edge（可用「浏览器内置 ASR」）、Firefox / Safari（自动走本地听写）；需 **HTTPS 或 localhost** 才能录音
+
+**Python 环境（识别后端）**
+- Python 3.9+（`setup.ps1` / `setup.sh` 自动创建 `.venv` 并安装依赖，无需手动装）
+
+**硬件**
+- 建议双核 CPU + ≥4GB 内存（本地模型常驻约 1-1.6GB）
+- 磁盘：whisper 模型 0.1-3GB（按型号）、FunASR 约 0.9GB（首次下载）
+
+**网络（首次使用）**
+- 首次安装需联网：安装依赖 + 下载模型
+- 国内默认走镜像源；**海外用户**如下载慢/失败：whisper 设 `DSH_HF_ENDPOINT=https://huggingface.co`、FunASR 设 `MODELSCOPE_ENDPOINT`
 - 完全离线环境无法使用本地引擎（云 ASR 不受影响，但需自备 API Key）
+
+**可选（云服务，按需配置）**
+- AI 精修：DeepSeek API Key
+- 云 ASR：OpenAI 兼容端点 / 豆包 API Key
 
 ## 目录结构
 
