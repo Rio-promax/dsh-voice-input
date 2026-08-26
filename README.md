@@ -1,6 +1,6 @@
 # DSH 语音输入插件
 
-在 DSH 输入栏直接语音输入文字：实时听写与整段录音两种方式，识别引擎可选浏览器内置、本地 whisper、FunASR 或云服务，识别后可选 DeepSeek 精修。
+在 DSH 输入栏直接语音输入文字：实时听写与整段录音两种方式，识别引擎可选浏览器内置、本地 whisper、FunASR 或云服务，识别后可选 AI精修。
 
 [![License](https://img.shields.io/github/license/Rio-promax/dsh-voice-input)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Rio-promax/dsh-voice-input)](https://github.com/Rio-promax/dsh-voice-input/releases)
@@ -10,18 +10,15 @@
 - **实时听写**：边说边识别，停顿自动切句
 - **整段模式**：录完再识别，适合长段口述
 - **识别引擎**：浏览器内置 ASR / 本地 whisper / FunASR（中文）/ 云 ASR（OpenAI 兼容、豆包）
-- **AI 精修**：DeepSeek 后台纠错（同音字、标点），可参考最近聊天语境
+- **AI 精修**：配置AI后台纠错（同音字、标点），可参考最近聊天语境
 - **本地引擎离线可用**，无额外费用，模型按需下载
 
-## 界面预览
-
-![输入栏语音按钮](assets/shot-1.png)
-
-![语音设置](assets/shot-2.png)
+## 位置预览
+<img width="1562" height="190" alt="image" src="https://github.com/user-attachments/assets/ee8b6673-806b-4b24-a6de-42ff3d46aa6d" />
 
 ## 安装
 
-需要 DSH 与 Python 3.9+。
+需要安装DSH到本地 与 Python 3.9+。
 
 **Windows**：
 
@@ -47,7 +44,7 @@ install.ps1 会完成：复制插件到 dsh profiles、注册组合、创建 .ve
 
 - **浏览器**：Chrome / Edge 可用浏览器内置 ASR；Firefox / Safari 自动走本地听写。录音需要 HTTPS 或 localhost
 - **Python**：3.9+，安装脚本自动创建 .venv
-- **硬件**：建议双核 CPU + ≥4GB 内存（本地模型常驻 1-1.6GB）；模型首次下载 0.1-3GB
+- **硬件**：建议双核 CPU + ≥4GB 内存（本地模型常驻 1-1.6GB）
 - **网络**：首次安装需联网下载依赖与模型；国内默认镜像，海外用户下载慢时设置 `DSH_HF_ENDPOINT=https://huggingface.co`（whisper）或 `MODELSCOPE_ENDPOINT`（FunASR）
 - **可选**：AI 精修需 DeepSeek API Key；云 ASR 需服务商 Key
 
