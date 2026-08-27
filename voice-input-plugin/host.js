@@ -276,6 +276,9 @@ let VoiceGateway = (() => {
   let _transcribe_decorators;
   let _polish_decorators;
   let _resetWorker_decorators;
+  // v59：跨浏览器设置持久化——Host 侧 <root>/.voice-prefs.json 为唯一事实源
+  let _getPrefs_decorators;
+  let _setPrefs_decorators;
   return class VoiceGateway extends _classSuper {
     static {
       const _metadata = typeof Symbol === "function" && Symbol.metadata ? Object.create(_classSuper[Symbol.metadata] ?? null) : void 0;
@@ -319,6 +322,18 @@ let VoiceGateway = (() => {
       __esDecorate(this, null, _resetWorker_decorators, {
         kind: "method", name: "resetWorker", static: false, private: false,
         access: { has: (obj) => "resetWorker" in obj, get: (obj) => obj.resetWorker },
+        metadata: _metadata,
+      }, null, _instanceExtraInitializers);
+      _getPrefs_decorators = [Remote("getPrefs")];
+      __esDecorate(this, null, _getPrefs_decorators, {
+        kind: "method", name: "getPrefs", static: false, private: false,
+        access: { has: (obj) => "getPrefs" in obj, get: (obj) => obj.getPrefs },
+        metadata: _metadata,
+      }, null, _instanceExtraInitializers);
+      _setPrefs_decorators = [Remote("setPrefs")];
+      __esDecorate(this, null, _setPrefs_decorators, {
+        kind: "method", name: "setPrefs", static: false, private: false,
+        access: { has: (obj) => "setPrefs" in obj, get: (obj) => obj.setPrefs },
         metadata: _metadata,
       }, null, _instanceExtraInitializers);
       if (_metadata) Object.defineProperty(this, Symbol.metadata, {
@@ -411,6 +426,52 @@ let VoiceGateway = (() => {
         return { ok: true };
       } catch (e) {
         return { ok: false, error: "重置本地识别服务失败: " + String((e && e.message) || e) };
+      }
+    }
+    /**
+     * v59: 跨浏览器设置持久化——读取 <root>/.voice-prefs.json。
+     * 文件不存在时返回空对象（客户端会把当前 localStorage 设置迁移上来）。
+     * 明文存储说明：与浏览器 localStorage 同等暴露（本机文件），README 有隐私提示。
+     */
+    async getPrefs() {
+      const root = await resolveRoot(this.ctx);
+      const fs = this.ctx.get("fs");
+      if (!fs || typeof fs.readText !== "function") {
+        return { ok: false, error: "文件服务不可用" };
+      }
+      const sep = _win() ? "\\" : "/";
+      try {
+        const target = await fs.resolve(root + sep + ".voice-prefs.json");
+        const info = await fs.stat(target);
+        if (!info) return { ok: true, prefs: {} };
+        const raw = await fs.readText(target);
+        const parsed = JSON.parse(raw);
+        return { ok: true, prefs: (parsed && typeof parsed === "object") ? parsed : {} };
+      } catch (e) {
+        return { ok: false, error: "读取设置失败: " + String((e && e.message) || e) };
+      }
+    }
+    /**
+     * v59: 跨浏览器设置持久化——原子写入 <root>/.voice-prefs.json。
+     * 任何浏览器（Chrome/Edge/豆包等）共享同一份设置与 Key。
+     */
+    async setPrefs(args) {
+      const prefs = args && args.prefs;
+      if (!prefs || typeof prefs !== "object") {
+        return { ok: false, error: "设置数据无效" };
+      }
+      const root = await resolveRoot(this.ctx);
+      const fs = this.ctx.get("fs");
+      if (!fs || typeof fs.writeText !== "function") {
+        return { ok: false, error: "文件服务不可用" };
+      }
+      const sep = _win() ? "\\" : "/";
+      try {
+        const target = await fs.resolve(root + sep + ".voice-prefs.json");
+        await fs.writeText(target, JSON.stringify(prefs, null, 2));
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: "保存设置失败: " + String((e && e.message) || e) };
       }
     }
     /** Transcribe one base64 WAV via the selected backend. */

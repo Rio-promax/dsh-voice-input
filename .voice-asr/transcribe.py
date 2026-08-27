@@ -341,9 +341,13 @@ def do_funasr(am, data):
 
     VAD 路径内部用 librosa.load(input, sr=16000)——传入 BytesIO 即可
     （soundfile 支持 file-like），避免临时文件与采样率转换。
+
+    v58：merge_vad=True + merge_length_silence=300——合并 VAD 相邻短段
+    （间隔 ≤300ms 的段并入同一段），消除段边界重复字（实测支持且输出正确；
+    整段模式长录音同样受益，长静音仍会被 VAD 跳过）。
     """
     try:
-        res = am.generate(io.BytesIO(data))
+        res = am.generate(io.BytesIO(data), merge_vad=True, merge_length_silence=300)
         text = ""
         for item in res or []:
             if isinstance(item, dict):

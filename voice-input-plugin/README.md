@@ -1,20 +1,20 @@
-# 语音输入插件 · 说明与版本记录
+# 语音输入插件 · 恢复与部署说明
 
-> 当前版本：**1.0.0**（对应 GitHub Release v1.0.0；下文"vNN"为开发期内部迭代号，仅作变更记录）
-> 详细说明见仓库根 `README.md`，分发/合规见 `DISTRIBUTION.md`。
+## 一、现状（v60：界面中英文切换 —— 已部署 ✅）
 
-## 一、现状（1.0.0：跨平台安装脚本 setup.sh + Linux/macOS 部署文档）
-
-- 插件 ID：`vmic-1`（已部署静态版，重启自动加载；本目录 `client.js`/`host.js` 快照 = 部署版 `lib/` 副本）
+- 插件 ID：`vmic-1`（已部署静态版 v60，重启自动加载；本目录 `client.js`/`host.js` 快照 = 部署版 `lib/` 副本）
 - 界面：输入栏右侧（模型选择旁）两个小按钮——🎤 麦克风、⚙ 设置
-- ⚙ 浮层设置：引擎（**浏览器内置 ASR 识别 / 本地 base whisper / 本地FunASR / 云 ASR**）→ 模型 → 语言 → 质量 + 标点/AI精修/**语境**/**整段**；API 配置折叠式；「本地模型管理」与「引擎说明」可折叠
+- ⚙ 浮层设置：引擎（**浏览器内置 ASR 识别 / 本地 base whisper / 本地FunASR / 云 ASR**）→ 模型 → 语言 → 质量 + 标点/AI精修/**语境**/**整段**；API 配置折叠式；「本地模型管理」「引擎说明」可折叠；底部一行左侧「清除保存的 Key」、右侧「**中 | EN**」界面语言分段开关（选中侧绿色）
+- **v60（界面中英文，已部署 ✅）**：新增**界面语言**偏好 `uiLang`（与识别语言 `lang` 独立，跨浏览器同步）——设置底部右侧改为**「中 | EN」两段式开关**，选中侧绿色高亮（高 18、内边距 6px）；**全界面文案双语化**（状态提示/按钮悬停/设置面板/引擎说明/API 配置等 ~60 处，经 `I18N` 字典 + `t(key, vars)` 助手）；英文界面下状态清理逻辑（聆听中/预热前缀判断）同步适配；识别语言仍由「语言」下拉独立控制（英文界面下识别中文不受影响）。**补充**：① 引擎加载期若检测到用户说话（VAD/响度触发），立即清除「聆听中…未识别到语音」误报；② **移除 v57 的「环境检测」折叠区**（用户要求，连同相关 I18N 键一并删除，按钮 tooltip 不再引用）
+- **v59（跨浏览器设置持久化，已部署 ✅）**：设置与 Key 从浏览器 localStorage 升级为 **Host 侧 `.voice-prefs.json`**（工作区根，任何浏览器共享——Chrome/Edge/豆包打开同一 dsh 看到同一份设置与 Key）；客户端启动时从服务端拉取合并（服务端优先），改动 400ms 防抖写回；服务端无数据时自动迁移当前 localStorage 设置。localStorage 降级为本地缓存（离线/服务不可用时不丢功能）。**隐私提示**：Key 明文存于本机工作区 `.voice-prefs.json`（与浏览器 localStorage 暴露面相当）；换机器不迁移。部署：lib/client.js + lib/index.js（Host 新增 Remote `getPrefs`/`setPrefs`，fs 服务读写）；备份于 `voice-input-plugin\.deploy-backup-2026-08-27\`
+- **v58（五件事）**：① **整段尾裁**——整段录音停止时裁剪尾部静音（与听写模式 v52 同款逻辑），缓解 whisper/FunASR 长静音尾部幻觉重复字并缩短识别耗时；`transcribe.py` FunASR 路径启用 `merge_vad=True, merge_length_silence=300`（合并 VAD 相邻短段消除段边界重复，实测长尾静音场景输出正确）；「正在识别…」提示带音频时长。② **精修配置说明**——AI精修配置区新增提示：Key 与 Prompt 仅保存在当前浏览器 localStorage，换浏览器/清缓存需重新填写（「消失」多为换浏览器所致）。③ **中英切换**——设置底部右侧按钮，点击在中文/English 间切换（联动「语言」下拉与浏览器实时识别；FunASR 固定中文禁用）。④ **浏览器适配**——识别 API 探测扩展（webkit/moz/ms/o 前缀 + 大小写兜底），环境检测显示实际探测到的 API 名；浏览器实时识别失败（网络重试耗尽/无服务/权限）时明确提示改用本地/云端引擎（不自动切换）。⑤ **预热如实提示**——预热文案按引擎显示真实预期（FunASR 实测冷加载 38-39s →「首次约 30-40 秒」，whisper 约 5-10 秒），预热上限 30s→60s（原 30s 会在正常加载中途误报超时）。⑥ **弹窗自适应高度**——设置面板最大高度按输入栏上方实际可用空间动态测量（原 `calc(100vh - 48px)` 低估，弹窗顶部会伸出屏幕导致顶部内容无法查看、滚动条不可用），打开时测量 + 窗口 resize 时重测
+- **v57（提示与超时四项优化）**：① **提示自动消失**——「已识别」「未识别到语音」「已停止」等成功/中性提示 3 秒后自动消失（错误提示保留）；② **无语音自动停止**——引擎就绪后连续 15 秒无语音自动停止并提示「未检测到语音，已自动停止」（预热期不计时；说话/文字上屏均重置计时；整段模式无语音且全程无声音时跳过转写直接结束）；③ **预热提示升级**——「本地引擎预热中…（已 N 秒，首次约 5-10 秒）」每 5s 刷新 + 完成后「引擎就绪」1.5s + 预热上限 30s（超时提示后仍可继续使用）；预热期间不再误显示「聆听中」；④ **环境检测**——设置面板新增折叠区，诊断 安全上下文/mediaDevices/AudioContext/SpeechRecognition 四项并给出缺失原因（豆包浏览器排查用），禁用按钮 tooltip 列出具体缺失项；另补上整段模式缺失的「聆听中…未识别到语音」提示。改动仅 client.js（纯前端），host.js/transcribe.py 不动
 - **v56（跨平台安装）**：新增 `setup.sh`（Linux/macOS 版安装脚本：建 venv + 装依赖 + 预下载 FunASR 模型 + DSH_VOICE_ROOT/海外镜像提示，参数 `-m/--mirror`、`--skip-models`）；`DISTRIBUTION.md` 新增「三-b、Linux/macOS 安装步骤」（setup.sh + 手动复制插件到 `~/.dsh/profiles/node_modules` + cordis.patch.yml 注册 + 重启）；功能全平台兼容（录音/whisper/FunASR/云后端无平台限制，Host 已按 POSIX 路径自适应），macOS 麦克风授权与 Linux 音频服务注意事项已写入文档
-- ⚙ 浮层设置：引擎（**浏览器内置 ASR 识别 / 本地 base whisper / 本地FunASR / 云 ASR**）→ 模型 → 语言 → 质量 + 标点/AI精修/**语境**/**整段**；API 配置折叠式；「本地模型管理」与「引擎说明」可折叠
 - **v55（删除模型存储位置行）**：引擎说明折叠区删除「本地模型（存储于 …）」行（v47 移入，用户认为无用）；当前引擎说明共 9 行：浏览器内置 / 本地whisper / 本地FunASR / 崩溃自动恢复 / 云 ASR / 标点 / AI精修 / 语境 / 整段
 - **v54（引擎说明补语境描述）**：折叠「引擎说明」在 AI精修 与 整段 之间新增一行「语境：精修时输入聊天上下文」（hover 说明：开启后 AI 精修会把最近聊天记录作为语境一并输入，帮助纠同音字/术语/人名；关闭可减少 token 用量）
-- **v53（精修成本优化 T1-T3）**：① **T-1**（部署+重启即生效，v51/v52 已含）：聊天语境作为历史消息注入 → DeepSeek 磁盘缓存命中，输入成本降 ~90%；② **T-2**：精修合并窗口 **240→400 字**——更多识别块并入一次精修，请求次数减少（每次省固定 system+历史 ~850 token 输入）；③ **T-3**：设置新增「**语境**」开关（默认开，持久化 `polishContext`）——关闭后精修不再携带聊天记录（每次省 ~700 token 输入，缓存更易命中），未配置 DeepSeek Key 时置灰
+- **v53（精修成本优化 T1-T3）**：① **T-1**（部署+重启即生效，v51/v52 已含）：聊天语境作为历史消息注入 → DeepSeek 磁盘缓存命中，输入成本降 ~90%；② **T-2**：精修合并窗口 **240→400 字**——更多识别块并入一次精修，请求次数减少（每次省固定 system+历史 ~850 token 输入），10 分钟语音精修次数约 40→25 次；③ **T-3**：设置新增「**语境**」开关（默认开，持久化 `polishContext`）——关闭后精修不再携带聊天记录（每次省 ~700 token 输入，缓存更易命中），未配置 DeepSeek Key 时置灰。成本实测核算：10 分钟语音 ~4 分钱 ≈ 输入 3-5 万 token + 输出 3-5 千 token（输出为重写，无法避免）；T1-T3 合计预期降至 ~1-2 分钱
 - **v52（内存清理 + 波形残留 + 尾部静音裁剪）**：① **M-1 引擎切换销毁 worker**——Host 新增 `resetWorker` Remote（terminate+kill 强化销毁，防孤儿进程）；Client 在引擎/模型切换时自动调用，**whisper 与 FunASR 不再同时驻留**（各 ~1-1.6GB），切到浏览器内置 ASR / 云 ASR 时同样销毁释放；成功后清空预热状态（下次使用重新加载）。② **Bug2 波形残留**——实时模式（stream/dict）入口先 `clearBatchResidual()`：终止未正常停止的整段采集、释放麦克风、清空波形/识别中状态（修复"关掉整段后实时模式仍显示音波图"）。③ **Bug3 末尾重复**——`startDictation` 并行记录每块 rms，flush 时**裁剪尾部连续静音块**（保留 ≥2 块，阈值与 VAD 一致），whisper 不再对长静音尾部幻觉重复字词/标点；默认精修 prompt 追加「合并重复的字词与标点（如"。。""的的"）」。已部署 ✅
-- **v51（聊天语境结构化 + 成本优化）**：① 聊天记录改为**结构化消息数组** `[{role, content}]` 作为**多轮历史消息**注入 `messages`（system → 历史 → 当前请求），前缀稳定 → DeepSeek 磁盘缓存命中最大化（聊天记录不变时每次精修仅最后一条按未命中计费）；② **上限 1500→1200 字、前后 8→6 条**；③ **完整消息优先截断**——从最新逐条累加，超 1200 字整条丢弃较旧消息，仅当第一条超长时截尾部；④ 相邻同角色消息合并、历史以 user 结尾时并入当前请求（保证 messages 严格交替，兼容严格网关）；⑤ 兼容旧版字符串格式（"用户：/助手："逐行解析）
+- **v51（聊天语境结构化 + 成本优化）**：① 聊天记录改为**结构化消息数组** `[{role, content}]` 作为**多轮历史消息**注入 `messages`（system → 历史 → 当前请求），前缀稳定 → DeepSeek 磁盘缓存命中最大化（聊天记录不变时每次精修仅最后一条按未命中计费）；② **上限 1500→1200 字、前后 8→6 条**；③ **完整消息优先截断**——从最新逐条累加，超 1200 字整条丢弃较旧消息，仅当第一条超长时截尾部；④ 相邻同角色消息合并、历史以 user 结尾时并入当前请求（保证 messages 严格交替，兼容严格网关）；⑤ 兼容旧版字符串格式（"用户：/助手："逐行解析）。已部署 ✅（v50+v51 一并上线）
 - **v50（AI 精修附带聊天记录语境）**：精修请求新增 `context` 参数——客户端从会话快照（`props.session.nodes`）提取最近消息随精修请求发送；Host `polish` 透传；`transcribe.py --chat` 注入对话历史参考。**隐私提示**：聊天记录随精修文本一起发送给 DeepSeek
 - **v49（API 徽标修正）**：API 配置按钮后的徽标**保留「云ASR」「精修」文字、仅删除 ✓/✗ 符号**（颜色状态区分保留：绿=已配置/灰=未配置）；修正 v48 的过度删除
 - **v48（移除 AUTO 与徽标）**：① **AUTO（自动发送）功能移除**——设置面板删除「AUTO」开关，prefs 移除 `autoSend` 键（旧 localStorage 值被白名单忽略，行为不再自动发送），startStream/stopDict/stopBatch 中的自动发送分支与 `autoSendRef`/`finalText` 一并删除，🎤 gear 悬停提示同步去掉「自动发送」；② API 配置按钮后的 ✓/✗ 符号删除（v49 恢复文字）
@@ -22,7 +22,7 @@
 - **v46（模型列表联动 + 大小精简）**：① **本地模型管理随引擎联动**——选「本地FunASR」只显示 paraformer-zh；选「本地 base whisper」只显示 tiny/base/small/medium/large-v3 五个；浏览器内置 ASR / 云 ASR 显示全部（现状）；② 模型行**只显示文件大小**（去掉参数量与备注，如 `tiny 约75MB`），FunASR size 同步精简为「约450MB」；③ 引擎介绍与云 ASR 设置保持不动
 - **v45（模型介绍回退 v42）**：v43 在用户未要求下给模型行添加的「（FunASR）」后缀与参数/大小/note 介绍文字**移除**——FunASR 行仅显示「模型名 + 状态圆点（+ 未下载时的下载按钮）」；whisper 行保持 v42 原样（id + params·size·note + 状态）；引擎说明文案不变
 - **v44（模型状态圆点化）**：本地模型管理每项前的状态改为**圆点**——**绿色 = 已下载**、**灰色 = 未下载**（hover 有文字提示），删除「可用 ✓ / 未下载·下载」文字；未下载项保留「下载」小按钮（下载中显示「下载中…」）；引擎说明文案不动
-- **v43（本地模型统一管理）**：① 引擎选项「FunASR 中文本地」→「**本地FunASR**」；② 「本地模型管理」列表纳入 FunASR——**paraformer-zh（FunASR）排第一位**，其下依次 tiny/base/small/medium/large-v3（whisper）；③ 已下载模型显示「**可用 ✓**」，未下载显示「未下载·下载」可点按下载（FunASR 一次性拉取 asr+vad+punc 约 0.9GB）；④ `transcribe.py --list-models` 返回合并列表（funasr 在前），下载状态检测：FunASR 查 ModelScope 缓存 `models/<org>--<repo>/snapshots`，whisper 查 HF 缓存
+- **v43（本地模型统一管理）**：① 引擎选项「FunASR 中文本地」→「**本地FunASR**」（与折叠说明一致）；② 「本地模型管理」列表纳入 FunASR——**paraformer-zh（FunASR）排第一位**，其下依次 tiny/base/small/medium/large-v3（whisper）；③ 已下载模型显示「**可用 ✓**」状态（此前为「已下载 ✓」），未下载显示「未下载·下载」可点按下载；④ `transcribe.py --list-models` 返回合并列表（funasr 在前），下载状态检测：FunASR 查 ModelScope 缓存 `models/<org>--<repo>/snapshots`（实测目录为 `iic--<repo>` 单目录结构），whisper 查 HF 缓存；⑤ 点 FunASR 下载会一次性拉取 asr+vad+punc 三个模型（约 0.9GB）
 - **v42（云 ASR 模型只读化，已部署）**：云 ASR 的模型由 API/服务商决定——「识别模型」在云 ASR 下仅**自定义预设**（OpenAI 兼容 + 空 BaseURL）可手填；其余预设（OpenAI 官方/Groq/硅基流动/智谱/豆包）只读展示「模型名（随服务商）」，防止误以为可任意选模型。v41 文案（延迟并入行内、崩溃合并、whisper 无空格）随本版一并部署
 - **v41（引擎说明最终文案）**：延迟并入引擎**同一行**（本地whisper：语言最多，首启较慢 / 本地FunASR：中文最好，首启较慢 / 云 ASR：外部大模型，延迟看网络）；「本地引擎偶发崩溃自动恢复」合并为一行置于两个本地引擎之下；**「本地 whisper」去掉空格为「本地whisper」**；来源信息（openai/阿里/API）移至 hover 悬停提示，行内全部 ≤20 字
 - **v39（说明文案 + 质量生效范围）**：折叠说明文案更新——「本地 whisper：语言最多（openai）」「本地FunASR：中文最好（阿里）」「AI精修：语音输出后两秒AI纠错」「整段：输入完毕后整体识别，关闭后实时识别（误差更大）」。**质量（beam）仅在「本地 base whisper」生效**（faster-whisper 解码束宽 1=快速/5=高质量）；浏览器内置 ASR / FunASR / 云 ASR 无此参数——**禁用并显示「不适用」**（此前 auto/funasr/cloud 虽已禁用但显示的是束宽数字，易误导）
@@ -59,7 +59,7 @@
 - **v23（核心修复）**：Typert 网关 SRC 回退按 Host 方法**源码参数名**做 wire 字段；客户端带参调用统一包 `{ args: {...} }` 对齐。此前 `transcribe/polish/downloadModel` 全部被网关拒绝（`args fields do not match the descriptor`），本地识别红字失败、AI 精修从未真正执行（错误被 `.catch` 静默吞掉）。修复后精修失败也会红字显示原因
 - v22：引擎三项化（自动/本地/云 ASR）、豆包并入「预设服务商」、旧配置自动迁移
 - v21 已含：错误格式化修复、auto 语义占位；v20：去括号标注；v19：豆包后端；v18：云 ASR 预设；v17：网络重试/失败可视化/模型管理/精修 Prompt
-- 版本历史：… → v22 豆包并入预设 → v23 Typert 参数描述符修复（识别/精修打通） → v24 延迟合并精修（伪句号掩码修复） → v25 设置弹窗滚动修复 + 产品说明文档 → v26 常驻可见滚动条 → **v27 本地识别常驻 worker + VAD 修正 + 会话代际** → **v28 设置弹窗说明精简** → **v29 本地引擎预热（选引擎即冷启动 + 启动提示）** → **v30 预热不阻塞开麦（后台并行 + 轻提示）** → **v31 连续说话超时强制切块（文字持续涌现）** → **v32 聆听中过程提示（≥3s 无上屏显示"聆听中…未识别到语音"，含秒数刷新）** → **v33 停止落定精修（本地/云引擎说完即停，最后一句也被 AI 精修）** → **v34 删除 2.5s 超时硬切（恢复纯静音切块，句子不再被切碎）** → **v35 新增「整段识别」可选模式（持续录音→停止后整体识别→正在识别提示+短波形→立即 AI 精修）** → **v36 整段模式录音中移除状态文案（仅保留红点+实时波形）** → **v37 FunASR 中文引擎（paraformer-zh ONNX，无 torch，中文大幅提升）+ 可移植化重构（DSH_VOICE_ROOT/PYTHON/HF_ENDPOINT + setup.ps1 + requirements.txt + DISTRIBUTION.md）** → **v38 引擎更名（浏览器内置 ASR/本地 base whisper/FunASR 中文本地）+ 可折叠引擎说明** → **v39 引擎说明文案更新（AI精修两秒纠错/整段对比）+ 质量选项仅本地 whisper 生效，其余引擎禁用显示「不适用」**
+- 版本历史：… → v22 豆包并入预设 → v23 Typert 参数描述符修复（识别/精修打通） → v24 延迟合并精修（伪句号掩码修复） → v25 设置弹窗滚动修复 + 产品说明文档 → v26 常驻可见滚动条 → **v27 本地识别常驻 worker + VAD 修正 + 会话代际** → **v28 设置弹窗说明精简** → **v29 本地引擎预热（选引擎即冷启动 + 启动提示）** → **v30 预热不阻塞开麦（后台并行 + 轻提示）** → **v31 连续说话超时强制切块（文字持续涌现）** → **v32 聆听中过程提示（≥3s 无上屏显示"聆听中…未识别到语音"，含秒数刷新）** → **v33 停止落定精修（本地/云引擎说完即停，最后一句也被 AI 精修）** → **v34 删除 2.5s 超时硬切（恢复纯静音切块，句子不再被切碎）** → **v35 新增「整段识别」可选模式（持续录音→停止后整体识别→正在识别提示+短波形→立即 AI 精修）** → **v36 整段模式录音中移除状态文案（仅保留红点+实时波形）** → **v37 FunASR 中文引擎（paraformer-zh ONNX，无 torch，中文大幅提升）+ 可移植化重构（DSH_VOICE_ROOT/PYTHON/HF_ENDPOINT + setup.ps1 + requirements.txt + DISTRIBUTION.md）** → **v38 引擎更名（浏览器内置 ASR/本地 base whisper/FunASR 中文本地）+ 可折叠引擎说明** → **v39 引擎说明文案更新（AI精修两秒纠错/整段对比）+ 质量选项仅本地 whisper 生效，其余引擎禁用显示「不适用」** → v40-v56（见上方现状列表） → **v57 提示自动消失（3s）+ 无语音自动停止（15s，预热期不计入）+ 预热提示升级（秒数/就绪/上限）+ 环境检测** → **v58 整段尾裁 + FunASR merge_vad + 中英切换 + 识别 API 探测扩展 + 预热如实提示（FunASR 冷加载 38-39s）+ 弹窗自适应高度** → **v59 跨浏览器设置持久化（Host 侧 .voice-prefs.json，已部署）** → **v60 界面中英文切换（「中 | EN」分段开关 + 全界面双语 ~80 处，已部署）**
 
 ## 二、重启后恢复（轻量过渡，1 分钟）
 
@@ -71,23 +71,33 @@
 2. `cordis_run`（mode: run）——在 UI 中批准
 3. 检查输入栏右侧出现 🎤 ⚙ 按钮
 
-## 三、依赖（由 setup.ps1 安装）
+## 三、依赖（已就绪，无需重装）
 
-| 组件 | 路径（相对仓库根） | 说明 |
+| 组件 | 路径 | 说明 |
 |---|---|---|
-| ASR 脚本 | `.voice-asr\transcribe.py` | 多后端调度器（probe/local/funasr/openai/volc） |
-| Python 环境 | `.venv\`（setup.ps1 创建） | faster-whisper + FunASR-ONNX + httpx |
-| 模型缓存 | `.hf\`（whisper）/ `.modelscope\`（FunASR） | 首次使用自动下载 |
+| ASR 脚本 | `D:\Codex\dsh语音输入\.voice-asr\transcribe.py` | 多后端调度器（probe/local/openai） |
+| Python 环境 | `D:\Codex\dsh语音输入\.venv\` | faster-whisper + edge-tts |
+| 模型缓存 | `D:\Codex\dsh语音输入\.hf\` | whisper base（hf-mirror 下载） |
 | 云端 Key（可选） | 环境变量 `DSH_ASR_API_KEY` / `DSH_ASR_BASE_URL` | OpenAI 兼容端点 |
 
-## 四、部署（分发版）
+## 四、部署级持久化（重启不丢）——已完成 ✅
 
-部署方式见根 README「快速开始」与 `DISTRIBUTION.md`（dsh 组合注册、环境变量 `DSH_VOICE_ROOT`/`DSH_VOICE_PYTHON`）。
+状态：**已部署**（2026-08-18，已验证 Host 模块可从部署目录加载）。
+
+| 项 | 位置 |
+|---|---|
+| 插件包（真实拷贝） | `C:\Users\catsk\.dsh\profiles\node_modules\dsh-plugin-voice-input\` |
+| 组合注册 | `C:\Users\catsk\.dsh\profiles\web\cordis.patch.yml`（`id: voice-input`，已追加） |
+| 备份 | `cordis.patch.yml.bak-20260818-002526` |
+| 同步脚本 | 本目录 `deploy.ps1`（版本更新后运行 `pwsh -File deploy.ps1` 重新同步） |
+
+**重要**：必须用**真实拷贝**而非 junction——Node 会把 junction 解析为真实路径，
+导致依赖（`dsh-typert-protocol`）沿真实路径向上查找失败（已实测验证）。
 
 **架构（静态部署版与动态版差异）**：
-- Host 半区：`host.js` = Typert Remote 服务 `voice`（`listBackends` / `transcribe` / `polish` / `warm`），
+- Host 半区：`lib/index.js` = Typert Remote 服务 `voice`（`listBackends` / `transcribe` / `polish`），
   经 `dsh-typert-protocol` 的 `@Remote` 机制暴露给浏览器
-- Client 半区：`client.js` = `window.__ModuleLoader__.load` 模块格式，
+- Client 半区：`lib/client.js` = `window.__ModuleLoader__.load` 模块格式，
   经 `ctx.remote.voice.*` 调用 Host（替代动态版的 `host.call`），样式经 document 注入
 - 配置/Key 仍存 localStorage（`dsh.voice.prefs.v1`），重启不丢
 
