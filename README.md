@@ -270,6 +270,67 @@ npx @deepseek-ai/dsh web
 - **没有图标**：确认部署代码已输出“部署完成”，停止旧 DSH 进程后再运行 npx @deepseek-ai/dsh web。
 - **本地模型下载失败**：检查网络和磁盘空间；可重新运行 setup.sh，脚本会复用已有缓存。
 
+## 麦克风权限与授权教程
+
+### 先说结论
+
+插件可以由代码发起权限申请，但不能替用户绕过浏览器或操作系统的安全确认。用户点击 🎤 时，插件会调用 `navigator.mediaDevices.getUserMedia({ audio: true })`：
+
+1. 浏览器允许后，插件才能获得麦克风音频流。
+2. macOS 还可能第一次向浏览器显示系统级授权弹窗。
+3. 如果用户之前已经允许过，通常不会再次弹窗。
+4. 如果用户之前拒绝过、换了浏览器或访问地址、权限被系统关闭，才需要按下面的教程重新授权。
+
+所以你之前操作时没有看到弹窗是正常的：很可能当前浏览器和 DSH 地址已经获得过授权。正常情况下，不需要在安装前提前手动授权；第一次点击 🎤 时按提示允许即可。即使调用 Permissions API，也只能读取权限状态，不能替用户授予权限。
+
+### 正常授权流程
+
+1. 使用 `npx @deepseek-ai/dsh web` 启动 DSH，并在浏览器打开 DSH 页面。
+2. 确认页面地址是 HTTPS 或 localhost；普通的远程 HTTP 页面会被浏览器阻止录音。
+3. 第一次点击 🎤。
+4. 浏览器弹出“允许使用麦克风”时，选择“允许”；如果出现选择设备的下拉框，选择实际使用的麦克风。
+5. macOS 如果再次弹出系统授权窗口，选择“允许”。
+6. 回到 DSH，再点击 🎤 开始录音。
+
+### Windows 系统权限
+
+如果 Windows 阻止了浏览器访问麦克风：
+
+- Windows 11：打开“开始 → 设置 → 隐私和安全性 → 麦克风”。
+- 打开“麦克风访问”和“允许应用访问你的麦克风”。
+- 继续打开“允许桌面应用访问你的麦克风”，因为 Chrome、Edge、Firefox 通常属于桌面应用。
+- Windows 10 的路径是“设置 → 隐私 → 麦克风”，打开“允许应用访问你的麦克风”。
+
+详见 [Microsoft：打开 Windows 麦克风应用权限](https://support.microsoft.com/en-us/windows/privacy/turn-on-app-permissions-for-your-microphone-in-windows)。
+
+### 浏览器网站权限
+
+如果没有弹窗，或者之前误点了“阻止”，在当前 DSH 页面按下面步骤恢复：
+
+- **Chrome**：点击地址栏左侧的锁形图标或权限图标，将“麦克风”改为“允许”，然后刷新页面。也可以打开 chrome://settings/content/microphone，在“不允许使用麦克风”中找到 DSH 地址并改为允许。
+- **Edge**：点击地址栏左侧的锁形图标或权限图标，将“麦克风”改为“允许”，或打开 edge://settings/content/microphone 检查 DSH 地址。
+- **Firefox**：点击地址栏左侧的权限图标，在“使用麦克风”中选择“允许”，然后刷新页面。
+
+Chrome 的完整说明见 [Google Chrome：使用摄像头和麦克风](https://support.google.com/chrome/answer/2693767)，Firefox 的说明见 [Mozilla：管理网站的摄像头和麦克风权限](https://support.mozilla.org/en-US/kb/how-manage-your-camera-and-microphone-permissions)。
+
+### macOS 系统权限
+
+如果 macOS 阻止了浏览器：
+
+1. 打开“苹果菜单 → 系统设置 → 隐私与安全性 → 麦克风”。
+2. 打开正在使用的浏览器（Chrome、Edge、Firefox 或 Safari）。
+3. 回到浏览器，刷新 DSH 页面，再次点击 🎤。
+4. Safari 还可以在“Safari → 设置 → 网站 → 麦克风”中，把当前 DSH 网站设置为“允许”。
+
+如果浏览器没有出现在 macOS 的麦克风列表中，先回到 DSH 页面点击一次 🎤 触发权限申请，再检查系统设置。详见 [Apple：控制 Mac 的麦克风访问权限](https://support.apple.com/en-gb/guide/mac-help/mchla1b1e1fe/mac)。
+
+### 根据界面提示排查
+
+- **麦克风权限未授予**：按上面的浏览器网站权限步骤设置为“允许”；macOS 还要打开系统设置中的浏览器权限。
+- **当前页面不是 HTTPS/localhost**：改用 localhost 启动，或为远程 DSH 配置 HTTPS。
+- **未找到麦克风设备**：检查系统声音输入设备、耳机或摄像头是否已连接。
+- **麦克风被占用**：关闭 Zoom、Teams、录音软件或其他正在使用麦克风的程序后重试。
+
 ## 使用
 
 - 点击 🎤 开始录音，再点击一次停止。
@@ -572,6 +633,67 @@ If you set export DSH_HOME=..., it also remains active in the current Terminal. 
 - **Profiles directory not found**: Make sure DSH_HOME points to the .dsh directory containing profiles.
 - **No icons**: Confirm that Deployment complete was printed, stop the old DSH process, and run npx @deepseek-ai/dsh web again.
 - **Local model download fails**: Check network access and disk space; rerun setup.sh, which reuses existing caches.
+
+## Microphone permissions and authorization guide
+
+### The short answer
+
+The plugin can request microphone access from code, but it cannot bypass the browser or operating system's security confirmation. When the user clicks 🎤, the plugin calls `navigator.mediaDevices.getUserMedia({ audio: true })`:
+
+1. The browser must allow the request before the plugin receives an audio stream.
+2. On macOS, the first request may also trigger a system-level permission dialog for the browser.
+3. If permission was already granted, no dialog normally appears again.
+4. Manual steps are needed only after a previous denial, when using a different browser or address, or when system privacy settings were turned off.
+
+Therefore, it is normal that you did not see a dialog during your own test. The current browser and DSH address probably already had permission. Users do not normally need to pre-authorize the microphone before installation; they can click 🎤 for the first time and choose Allow when prompted. Even the Permissions API can only read the permission state; it cannot grant permission on the user's behalf.
+
+### Normal authorization flow
+
+1. Start DSH with `npx @deepseek-ai/dsh web` and open the DSH page in a browser.
+2. Make sure the page uses HTTPS or localhost; a regular remote HTTP page cannot record audio.
+3. Click 🎤 for the first time.
+4. When the browser asks to use the microphone, choose Allow and select the intended device if a device menu appears.
+5. If macOS shows a system permission dialog, choose Allow.
+6. Return to DSH and click 🎤 again to start recording.
+
+### Windows system permission
+
+If Windows blocks the browser from using the microphone:
+
+- Windows 11: open Start → Settings → Privacy & security → Microphone.
+- Turn on Microphone access and Let apps access your microphone.
+- Also turn on Let desktop apps access your microphone because Chrome, Edge, and Firefox are normally desktop apps.
+- On Windows 10, open Settings → Privacy → Microphone and turn on Allow apps to access your microphone.
+
+See [Microsoft: Turn on app permissions for your microphone in Windows](https://support.microsoft.com/en-us/windows/privacy/turn-on-app-permissions-for-your-microphone-in-windows).
+
+### Browser site permission
+
+If no dialog appears, or the user previously clicked Block, restore permission while viewing the DSH page:
+
+- **Chrome**: click the lock or permissions icon to the left of the address bar, set Microphone to Allow, and reload the page. You can also open chrome://settings/content/microphone and change the DSH address from Not allowed to Allow.
+- **Edge**: click the lock or permissions icon to the left of the address bar and set Microphone to Allow, or open edge://settings/content/microphone and check the DSH address.
+- **Firefox**: click the permissions icon to the left of the address bar, set Use the Microphone to Allow, and reload the page.
+
+See [Google Chrome: Use your camera and microphone](https://support.google.com/chrome/answer/2693767) and [Mozilla: Manage camera and microphone permissions](https://support.mozilla.org/en-US/kb/how-manage-your-camera-and-microphone-permissions).
+
+### macOS system permission
+
+If macOS blocks the browser:
+
+1. Open Apple menu → System Settings → Privacy & Security → Microphone.
+2. Enable the browser in use: Chrome, Edge, Firefox, or Safari.
+3. Return to the browser, reload the DSH page, and click 🎤 again.
+4. In Safari, you can also open Safari → Settings → Websites → Microphone and set the current DSH site to Allow.
+
+If the browser is not listed in the macOS microphone panel, click 🎤 once in DSH to trigger the request, then check System Settings again. See [Apple: Control access to the microphone on Mac](https://support.apple.com/en-gb/guide/mac-help/mchla1b1e1fe/mac).
+
+### Match the UI message to the fix
+
+- **Microphone permission not granted**: set the browser site permission to Allow; on macOS, also enable the browser in System Settings.
+- **This page is not HTTPS/localhost**: use localhost or configure HTTPS for a remote DSH deployment.
+- **No microphone device found**: check the system input device, headset, or camera connection.
+- **Microphone is in use**: close Zoom, Teams, recording software, or another application currently using the microphone.
 
 ## Usage
 
