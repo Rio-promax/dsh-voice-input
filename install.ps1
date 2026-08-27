@@ -20,7 +20,7 @@ param(
   [string]$Mirror = ""
 )
 $ErrorActionPreference = 'Stop'
-$src = Split-Path -Parent $PSScriptRoot   # 仓库根（含 .voice-asr、voice-input-plugin）
+$src = $PSScriptRoot                    # 仓库根（含 .voice-asr、voice-input-plugin）
 $pkg = Join-Path $src 'voice-input-plugin'
 
 Write-Host "==> 仓库根: $src"
