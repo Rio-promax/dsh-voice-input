@@ -11,12 +11,14 @@
 | 插件包 | `voice-input-plugin\`（npm 包 `dsh-plugin-voice-input`） | Host/Client 半区 + 部署脚本 |
 | ASR 调度器 | `.voice-asr\transcribe.py` | 多后端调度（faster-whisper / FunASR / OpenAI 兼容 / 豆包 / DeepSeek 精修） |
 | Python 依赖 | `requirements.txt` | faster-whisper + httpx + FunASR ONNX（onnxruntime，**无 torch**） |
-| 安装脚本 | `setup.ps1`（Windows） | 建 venv → 装依赖 → 可选预下载 FunASR 模型 |
+| 安装/部署脚本 | `install.ps1`（Windows 一键安装）/ `setup.ps1`（仅 Python 依赖） | 注册插件、创建 venv、安装依赖；模型可选预下载 |
 | 模型缓存 | `<模型目录>\.hf`（whisper）、`<模型目录>\.modelscope`（FunASR） | 模型按需下载，目录可在设置中选择，**不随包分发** |
 
 ## 二、安装前提（使用者侧）
 
 - Python 3.9+（建议 3.10-3.12），安装时加入 PATH
+- Node.js `22.19+` 或 `24+`，并确保 `npm`/`npx` 可用
+- 先运行一次 `npx @deepseek-ai/dsh web --no-open` 初始化 DSH web profile，启动后按 Ctrl+C 停止
 - 浏览器：Chrome/Edge（实时识别）或任意支持 `getUserMedia` 的浏览器（听写/整段/FunASR）
 - 资源：建议双核 CPU + ≥4GB 内存；模型常驻约 1GB 内存
 - 首次运行需联网下载模型（whisper ~0.1-3GB 可选；FunASR paraformer ~450MB + VAD ~30MB，可选标点模型 ~450MB）
@@ -24,15 +26,13 @@
 ## 三、安装步骤（Windows）
 
 ```powershell
-# 1. 克隆/复制整个工作区（含 .voice-asr、voice-input-plugin）
-# 2. 安装依赖（默认不下载模型；可加 -Mirror 指定 pip 镜像）
-pwsh -File voice-input-plugin\setup.ps1 -Mirror https://pypi.tuna.tsinghua.edu.cn/simple
+# 1. 克隆/复制整个仓库，并从仓库根目录执行
+# 2. 一键安装插件、注册组合并安装 Python 依赖（默认不下载模型）
+pwsh -ExecutionPolicy Bypass -File .\install.ps1 -Mirror https://pypi.tuna.tsinghua.edu.cn/simple
 #    -WithModels       明确预下载 FunASR ASR + VAD 模型
 #    -ModelRoot E:\DSH\models  把预下载模型放到指定目录
-#    -WithPunctuation  预下载时额外加入 FunASR 标点模型（中文标点更佳）
-#    -SkipModels       兼容旧参数，跳过模型预下载
-# 3. 部署插件（注册进 dsh 组合）
-pwsh -File voice-input-plugin\deploy.ps1
+#    -SkipModels       跳过模型预下载（默认行为）
+# 3. 如需浏览器内置 ASR，可用 -SkipPython 跳过 Python 依赖
 # 4. 重启 DSH
 npx @deepseek-ai/dsh web
 ```
@@ -48,7 +48,7 @@ Linux/macOS 使用 `setup.sh` + 手动部署：
 bash voice-input-plugin/setup.sh -m https://pypi.tuna.tsinghua.edu.cn/simple
 #    --skip-models  兼容旧参数，跳过模型预下载（模型在设置中按需下载）
 
-# 2. 手动部署插件到 dsh profiles（无 install.ps1，Linux 版手动完成）
+# 2. 手动部署插件到 dsh profiles（Linux/macOS 无 install.ps1）
 mkdir -p ~/.dsh/profiles/node_modules/dsh-plugin-voice-input/lib
 cp voice-input-plugin/package.json ~/.dsh/profiles/node_modules/dsh-plugin-voice-input/
 cp voice-input-plugin/host.js    ~/.dsh/profiles/node_modules/dsh-plugin-voice-input/lib/index.js
@@ -110,5 +110,5 @@ Linux 需 PulseAudio/PipeWire 正常工作。
 ## 六、打包建议
 
 - 插件本体可发布为 npm 包（`package.json` 已含 `exports["./client"]` 与 `dsh.client` 声明）；模型与 venv **不随包分发**（体积与再分发许可考虑），由设置面板或显式安装参数按需下载。
-- 组合注册：`deploy.ps1` 幂等追加 `cordis.patch.yml` 的 `voice-input` 行（只增改自己的 insert 区块，勿整体覆盖共享 patch 文件）。
+- 组合注册：Windows 使用仓库根目录的 `install.ps1` 幂等追加 `cordis.patch.yml` 的 `voice-input` 行；Linux/macOS 按上面的手动步骤追加（只增改自己的 insert 区块，勿整体覆盖共享 patch 文件）。
 - 跨平台：`transcribe.py` 与 Host 路径处理已按 Windows/POSIX 自适应（`.venv\Scripts` vs `.venv\bin`）；`setup.ps1` 仅 Windows，Linux/macOS 使用者按 requirements.txt 手动建 venv 即可。

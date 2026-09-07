@@ -8,6 +8,7 @@
 > 3. `voice-input-plugin/README.md` — v17→v28（工程视角）
 >
 > 版本号口径说明：v9 之前动态插件包名未带版本号，v9 起在包名中显式编号（如 `pkg-N` / `(Compact v10)` 等）；部署静态版后仍沿用同一版本序列。
+> 对外版本映射：GitHub Release `1.1` 对应本文件中的内部实现线 `v62`。
 
 ## 侧记 SideNote（独立插件）
 
@@ -29,7 +30,7 @@
 - Host 设置持久化迁移到稳定的 DSH 数据目录（支持 `DSH_VOICE_DATA_ROOT`），采用白名单、长度限制与临时文件 + rename 原子写入；保留 v59 工作区文件的一次性迁移路径。
 - Client 保留 localStorage 作为离线缓存，但 Host 读写失败会在设置面板显示红字；清除 Key 同时覆盖 OpenAI、DeepSeek 与豆包凭据。
 - 本地模型管理新增保存目录，Whisper/FunASR 缓存通过 Host 注入到该目录；本地 worker 在目录变更后自动释放并重建。
-- 安装脚本改为默认只装 Python 依赖、不预下载大模型；`-WithModels` / `-ModelRoot` 用于显式预下载。`deploy.ps1` 只复制顶层 canonical 源文件，防止旧 `lib/` 快照回退。
+- 安装脚本改为默认只装 Python 依赖、不预下载大模型；`-WithModels` / `-ModelRoot` 用于显式预下载。Windows `install.ps1` 只复制顶层 canonical 源文件，防止旧 `lib/` 快照回退。
 - 设置 RPC 支持白名单字段的局部合并写入；FunASR 仅在完整 snapshots 缓存存在时标记为已下载。
 - 移除运行代码中的个人绝对路径，并统一子进程失败返回，避免二次 `outcome` 异常。
 

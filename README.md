@@ -2,7 +2,7 @@
 
 在 DSH 输入栏直接语音输入文字：支持实时听写和整段录音，识别引擎可选浏览器内置 ASR、本地 whisper、FunASR 或云服务，识别后还可以使用 AI 精修。
 
-当前实现：v62（设置跨浏览器持久化、模型目录可选、模型按需下载、安装/部署入口统一）。
+当前对外版本：1.1（设置跨浏览器持久化、模型目录可选、模型按需下载、安装/部署入口统一）。
 
 [![License](https://img.shields.io/github/license/Rio-promax/dsh-voice-input)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Rio-promax/dsh-voice-input)](https://github.com/Rio-promax/dsh-voice-input/releases)
@@ -21,9 +21,8 @@
 
 ## 安装前提
 
-- **DSH**：先在本机安装 DSH，并确认 npx @deepseek-ai/dsh web 可以正常启动。
+- **Node.js / DSH**：Node.js `22.19+` 或 `24+`，并包含 npm/npx。无需单独安装全局 DSH；首次运行 `npx @deepseek-ai/dsh web --no-open` 即可拉取并启动 DSH、初始化 web profile。
 - **Python**：Python 3.9 或更高版本；推荐 3.10–3.12，并加入 PATH。
-- **Node.js**：DSH 使用 Node.js、npm 和 npx。
 - **浏览器**：Chrome/Edge 支持浏览器内置 ASR；任意支持 getUserMedia 的浏览器都可以使用录音和本地引擎。
 - **资源**：建议双核 CPU 和至少 4GB 内存。本地模型常驻约 1–1.6GB 内存；首次下载需要数百 MB 到约 1GB 以上空间。
 - **录音权限**：浏览器录音需要 HTTPS 或 localhost；macOS 首次录音还需要在系统设置中允许浏览器访问麦克风。
@@ -60,9 +59,15 @@ python --version
 
 如果 python 不存在，请从 [python.org](https://www.python.org/downloads/) 安装 Python 3.9+，安装时勾选 **Add Python to PATH**。
 
-### 2. 停止 DSH 并进入仓库根目录
+### 2. 首次初始化并停止 DSH
 
-先退出正在运行的 DSH 实例，再打开 PowerShell，进入仓库根目录：
+如果这是第一次使用 DSH，先运行下面的命令初始化 web profile；看到 DSH 启动后按 Ctrl+C 停止。已经成功运行过 DSH 的用户直接退出旧实例即可。
+
+~~~powershell
+npx @deepseek-ai/dsh web --no-open
+~~~
+
+然后打开 PowerShell，进入仓库根目录：
 
 ~~~powershell
 Set-Location -LiteralPath 'C:\path\to\dsh-voice-input'
@@ -166,6 +171,8 @@ Python 必须是 3.9+。Intel Mac 和 Apple Silicon Mac 使用同一套安装流
 ~~~bash
 cd /path/to/dsh-voice-input
 ~~~
+
+首次使用 DSH 时，先运行 `npx @deepseek-ai/dsh web --no-open` 初始化 web profile；看到服务启动后按 Ctrl+C 停止，再继续下面的安装步骤。
 
 ### 3. 安装 Python 依赖和本地模型
 
@@ -393,9 +400,8 @@ Add voice input directly to the DSH input bar. The plugin supports realtime dict
 
 ## Prerequisites
 
-- **DSH**: Install DSH locally and make sure npx @deepseek-ai/dsh web starts successfully.
+- **Node.js / DSH**: Node.js `22.19+` or `24+`, with npm/npx available. A separate global DSH install is not required; run `npx @deepseek-ai/dsh web --no-open` once to download/start DSH and initialize the web profile.
 - **Python**: Python 3.9 or newer; 3.10–3.12 is recommended and Python must be on PATH.
-- **Node.js**: DSH requires Node.js, npm, and npx.
 - **Browser**: Chrome/Edge support browser ASR; any browser supporting getUserMedia can use recording and local backends.
 - **Resources**: At least a dual-core CPU and 4GB RAM are recommended. Local models use roughly 1–1.6GB RAM and may require hundreds of MB to more than 1GB for the first download.
 - **Recording permission**: Browser recording requires HTTPS or localhost; on macOS, also grant the browser microphone permission in System Settings.
@@ -432,9 +438,15 @@ python --version
 
 If python is not found, install Python 3.9+ from [python.org](https://www.python.org/downloads/) and select **Add Python to PATH** during installation.
 
-### 2. Stop DSH and enter the repository root
+### 2. Initialize the DSH profile and stop DSH
 
-Quit any running DSH instance first. Then open PowerShell and enter the repository root:
+If this is the first DSH run, execute the following command once to initialize the web profile. After DSH starts, press Ctrl+C to stop it. If DSH has already started successfully before, just quit the old instance.
+
+~~~powershell
+npx @deepseek-ai/dsh web --no-open
+~~~
+
+Then open PowerShell and enter the repository root:
 
 ~~~powershell
 Set-Location -LiteralPath 'C:\path\to\dsh-voice-input'
@@ -538,6 +550,8 @@ Use the Git clone or ZIP links above. After extracting the archive, enter the re
 ~~~bash
 cd /path/to/dsh-voice-input
 ~~~
+
+On the first DSH run, execute `npx @deepseek-ai/dsh web --no-open` once to initialize the web profile. After the service starts, press Ctrl+C to stop it before continuing with the installation steps below.
 
 ### 3. Install Python dependencies and local models
 
