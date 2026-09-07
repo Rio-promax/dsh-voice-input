@@ -1,4 +1,7 @@
-// 语音输入插件 Client 半区（静态部署版 v59，模块加载器格式）
+// 语音输入插件 Client 半区（静态部署版 v62，模块加载器格式）
+// v62：设置跨浏览器持久化、模型缓存目录可选、安装/部署入口统一；
+// v61：整段识别中不再渲染波形图（波形仅录音中显示）；识别状态精简为「正在识别…」，
+// 仅超 5s 追加「（已用 Ns）」——避免识别时波形+长文案把输入栏拉宽延伸。
 // v57：①成功/中性提示（已识别等）3s 自动消失；②引擎就绪后无语音 15s 自动停止（预热期不计入）；
 // ③预热提示带秒数 + 「引擎就绪」+ 上限；④按钮禁用原因细化。
 // v58：①整段录音尾部静音裁剪（重复字缓解）+ 识别中显示音频时长；②精修配置区加 localStorage 提示；
@@ -39,7 +42,7 @@ window.__ModuleLoader__.load({
           });
           return {
             listBackends: () => call("listBackends"),
-            listModels: () => call("listModels"),
+            listModels: (args) => call("listModels", args),
             downloadModel: (args) => call("downloadModel", args),
             transcribe: (args) => call("transcribe", args),
             polish: (args) => call("polish", args),
@@ -204,7 +207,7 @@ window.__ModuleLoader__.load({
         }
 
         const STORAGE_KEY = 'dsh.voice.prefs.v1'
-        const PERSISTED_KEYS = ['engine', 'asrProvider', 'model', 'lang', 'beam', 'usePunct', 'aiPolish', 'polishPrompt', 'polishContext', 'batchMode', 'asrKey', 'asrBaseUrl', 'deepseekKey', 'deepseekBaseUrl', 'volcAppId', 'volcAccessToken', 'volcCluster', 'uiLang']
+        const PERSISTED_KEYS = ['engine', 'asrProvider', 'model', 'lang', 'beam', 'usePunct', 'aiPolish', 'polishPrompt', 'polishContext', 'batchMode', 'asrKey', 'asrBaseUrl', 'deepseekKey', 'deepseekBaseUrl', 'volcAppId', 'volcAccessToken', 'volcCluster', 'uiLang', 'modelRoot']
 
         // v60：界面中英文（i18n）——uiLang: 'zh' | 'en'；t(key, vars) 取当前界面语言文案。
         // 识别语言（prefs.lang）与界面语言（prefs.uiLang）相互独立。
@@ -217,8 +220,8 @@ window.__ModuleLoader__.load({
             'status.polishFail': '精修失败: {err}',
             'status.listening': '聆听中…未识别到语音',
             'status.listeningSec': '聆听中…未识别到语音（{s}s）',
-            'status.micDenied': '麦克风权限未授予：请在地址栏将麦克风设为允许；macOS 还需在系统设置中打开',
-            'status.micDeniedInsecure': '当前页面不是 HTTPS/localhost，浏览器会阻止录音',
+            'status.micDenied': '麦克风被拒绝：请检查浏览器权限',
+            'status.micDeniedInsecure': '麦克风被拒绝：页面非 HTTPS/localhost，浏览器禁用录音',
             'status.noMic': '未找到麦克风设备',
             'status.micBusy': '麦克风被占用，请关闭其他应用',
             'status.micStartFail': '麦克风启动失败: {err}',
@@ -242,8 +245,9 @@ window.__ModuleLoader__.load({
             'status.tooLong': '录音过长（超过 10 分钟），请分段识别',
             'status.tooShort': '录音过短，未识别',
             'status.noSpeech': '未识别到语音',
-            'status.recognizingAudio': '正在识别…（音频 {a}s）',
-            'status.recognizingAudioSec': '正在识别…（音频 {a}s，已用 {e}s）',
+            // v61：识别状态精简——始终「正在识别…」，仅超 5s 追加「（已用 Ns）」
+            'status.recognizing': '正在识别…',
+            'status.recognizingElapsed': '正在识别…（已用 {e}s）',
             // ---- 按钮提示 ----
             'ui.insecure': '非安全上下文（需 HTTPS 或 localhost）',
             'ui.noMediaApi': '无麦克风 API',
@@ -312,6 +316,13 @@ window.__ModuleLoader__.load({
             'set.apiKeyPhEmpty': 'API Key',
             'set.polishCfgTitle': 'AI精修（DeepSeek）配置',
             'set.polishStorageHint': '设置与 Key 保存在本机服务端（.voice-prefs.json），换浏览器/清除浏览器数据不丢失；首次会在本机自动同步。',
+            'set.storageSyncError': '本机设置同步失败：{err}。当前浏览器缓存仍可用，请检查 DSH Host。',
+            'set.modelPath': '模型保存目录',
+            'set.modelPathPh': '留空使用默认目录；也可填写其他磁盘路径',
+            'set.modelPathDefault': '当前目录：{path}',
+            'set.modelPathApply': '应用目录',
+            'set.modelPathReset': '使用默认',
+            'set.modelPathHint': '模型按需下载，不会随插件本体自动下载；更换目录后只影响后续下载与识别。',
             'set.deepseekBasePh': 'Base URL（默认 https://api.deepseek.com/v1）',
             'set.deepseekKeyPh': 'DeepSeek API Key（已配置，可修改）',
             'set.deepseekKeyPhEmpty': 'DeepSeek API Key',
@@ -338,7 +349,7 @@ window.__ModuleLoader__.load({
             'set.explainBatch': '整段：输入完毕后整体识别，关闭后实时识别（误差更大）',
             'set.explainBrowserTitle': 'Chrome/Edge 内置语音识别（Firefox/Safari 自动改走实时听写）',
             'set.explainWhisperTitle': 'OpenAI Whisper 多语言开源模型，本地离线；质量（beam）仅此引擎生效',
-            'set.explainFunasrTitle': '阿里达摩院 paraformer-zh，本地离线，首次自动下载',
+            'set.explainFunasrTitle': '阿里达摩院 paraformer-zh，本地离线，模型按需下载',
             'set.explainRecoverTitle': '本地 worker 进程偶发崩溃时自动一次性回退并后台重建，下一块即恢复',
             'set.explainCloudTitle': 'OpenAI 兼容 / 豆包等外部服务，需自备 API Key',
             'set.clearKeys': '清除保存的 Key',
@@ -356,8 +367,8 @@ window.__ModuleLoader__.load({
             'status.polishFail': 'Polish failed: {err}',
             'status.listening': 'Listening… no speech yet',
             'status.listeningSec': 'Listening… no speech yet ({s}s)',
-            'status.micDenied': 'Microphone permission not granted: set the address-bar microphone permission to Allow; macOS also needs System Settings access',
-            'status.micDeniedInsecure': 'This page is not HTTPS/localhost, so the browser blocks recording',
+            'status.micDenied': 'Microphone denied: check browser permission',
+            'status.micDeniedInsecure': 'Microphone denied: page is not HTTPS/localhost (browser blocks recording)',
             'status.noMic': 'No microphone device found',
             'status.micBusy': 'Microphone in use, close other apps',
             'status.micStartFail': 'Microphone start failed: {err}',
@@ -381,8 +392,9 @@ window.__ModuleLoader__.load({
             'status.tooLong': 'Recording too long (>10 min), please split it',
             'status.tooShort': 'Recording too short, not recognized',
             'status.noSpeech': 'No speech detected',
-            'status.recognizingAudio': 'Recognizing… (audio {a}s)',
-            'status.recognizingAudioSec': 'Recognizing… (audio {a}s, elapsed {e}s)',
+            // v61：识别状态精简——始终「Recognizing…」，仅超 5s 追加「(elapsed Ns)」
+            'status.recognizing': 'Recognizing…',
+            'status.recognizingElapsed': 'Recognizing… (elapsed {e}s)',
             // ---- tooltips ----
             'ui.insecure': 'Not a secure context (HTTPS or localhost required)',
             'ui.noMediaApi': 'No microphone API',
@@ -451,6 +463,13 @@ window.__ModuleLoader__.load({
             'set.apiKeyPhEmpty': 'API Key',
             'set.polishCfgTitle': 'AI Polish (DeepSeek) Settings',
             'set.polishStorageHint': 'Settings & keys are stored on this machine (.voice-prefs.json) — shared across browsers; clearing browser data won\'t lose them.',
+            'set.storageSyncError': 'Machine settings sync failed: {err}. Browser cache is still available; check the DSH Host.',
+            'set.modelPath': 'Model directory',
+            'set.modelPathPh': 'Blank uses the default; another drive is supported',
+            'set.modelPathDefault': 'Current directory: {path}',
+            'set.modelPathApply': 'Apply directory',
+            'set.modelPathReset': 'Use default',
+            'set.modelPathHint': 'Models download on demand; the plugin does not fetch them during install. Changing this affects future downloads and recognition.',
             'set.deepseekBasePh': 'Base URL (default https://api.deepseek.com/v1)',
             'set.deepseekKeyPh': 'DeepSeek API Key (configured, editable)',
             'set.deepseekKeyPhEmpty': 'DeepSeek API Key',
@@ -477,7 +496,7 @@ window.__ModuleLoader__.load({
             'set.explainBatch': 'Batch: recognize all at once on stop; off = realtime (less accurate)',
             'set.explainBrowserTitle': 'Chrome/Edge built-in speech (Firefox/Safari fall back to dictation)',
             'set.explainWhisperTitle': 'OpenAI Whisper multilingual open model, local & offline; quality (beam) only applies here',
-            'set.explainFunasrTitle': 'Alibaba DAMO paraformer-zh, local & offline, auto-downloaded on first use',
+            'set.explainFunasrTitle': 'Alibaba DAMO paraformer-zh, local & offline, downloaded on demand',
             'set.explainRecoverTitle': 'Auto one-shot fallback + background rebuild when local worker crashes; next chunk recovers',
             'set.explainCloudTitle': 'OpenAI-compatible / Doubao external services, bring your own API key',
             'set.clearKeys': 'Clear saved keys',
@@ -495,18 +514,34 @@ window.__ModuleLoader__.load({
           return s
         }
 
-        // v59：跨浏览器设置持久化——改动 400ms 防抖写回 Host（<root>/.voice-prefs.json，
-        // 任何浏览器共享；localStorage 降级为本地缓存）。函数声明提升，供 prefs.set 调用。
+        // v62：跨浏览器设置持久化——改动 400ms 防抖写回 Host 数据目录。
+        // localStorage 仍保留为离线缓存；Host 写入失败必须对用户可见，不能静默吞掉。
         let prefsPushTimer = null
+        let prefsSyncError = ''
+        const prefsSyncListeners = new Set()
+        function notifyPrefsSync(error) {
+          const next = error ? String(error) : ''
+          if (prefsSyncError === next) return
+          prefsSyncError = next
+          prefsSyncListeners.forEach((fn) => { try { fn(prefsSyncError) } catch (e) {} })
+        }
         function schedulePrefsPush() {
           if (prefsPushTimer) clearTimeout(prefsPushTimer)
           prefsPushTimer = setTimeout(() => {
             prefsPushTimer = null
             const v = voiceRemote()
-            if (!v || typeof v.setPrefs !== 'function') return
+            if (!v || typeof v.setPrefs !== 'function') {
+              notifyPrefsSync('本机服务未连接')
+              return
+            }
             const save = {}
             for (const k of PERSISTED_KEYS) save[k] = prefs[k]
-            v.setPrefs({ prefs: save }).catch(() => {})
+            Promise.resolve(v.setPrefs({ prefs: save })).then((res) => {
+              if (!res || res.ok !== true) notifyPrefsSync((res && res.error) || '本机服务未确认保存')
+              else notifyPrefsSync('')
+            }).catch((err) => {
+              notifyPrefsSync((err && (err.message || err.error)) || String(err || '本机服务不可用'))
+            })
           }, 400)
         }
 
@@ -541,6 +576,8 @@ window.__ModuleLoader__.load({
           volcAppId: '',
           volcAccessToken: '',
           volcCluster: '',
+          // v62：模型缓存根目录。留空沿用 ASR 工作区，可填写其他磁盘目录。
+          modelRoot: '',
           // v60：界面语言（中/EN），与识别语言（lang）独立
           uiLang: 'zh',
         }, loadSaved(), {
@@ -548,7 +585,7 @@ window.__ModuleLoader__.load({
           envPolishAvailable: false,
           settingsOpen: false,
           listeners: new Set(),
-          get() { return { engine: this.engine, asrProvider: this.asrProvider, model: this.model, lang: this.lang, beam: this.beam, usePunct: this.usePunct, aiPolish: this.aiPolish, polishPrompt: this.polishPrompt, polishContext: this.polishContext, batchMode: this.batchMode, envAsrAvailable: this.envAsrAvailable, envPolishAvailable: this.envPolishAvailable, asrKey: this.asrKey, asrBaseUrl: this.asrBaseUrl, deepseekKey: this.deepseekKey, deepseekBaseUrl: this.deepseekBaseUrl, volcAppId: this.volcAppId, volcAccessToken: this.volcAccessToken, volcCluster: this.volcCluster, uiLang: this.uiLang, settingsOpen: this.settingsOpen } },
+          get() { return { engine: this.engine, asrProvider: this.asrProvider, model: this.model, lang: this.lang, beam: this.beam, usePunct: this.usePunct, aiPolish: this.aiPolish, polishPrompt: this.polishPrompt, polishContext: this.polishContext, batchMode: this.batchMode, envAsrAvailable: this.envAsrAvailable, envPolishAvailable: this.envPolishAvailable, asrKey: this.asrKey, asrBaseUrl: this.asrBaseUrl, deepseekKey: this.deepseekKey, deepseekBaseUrl: this.deepseekBaseUrl, volcAppId: this.volcAppId, volcAccessToken: this.volcAccessToken, volcCluster: this.volcCluster, uiLang: this.uiLang, modelRoot: this.modelRoot, settingsOpen: this.settingsOpen } },
           set(patch) {
             let changed = false
             for (const k in patch) {
@@ -564,7 +601,7 @@ window.__ModuleLoader__.load({
             }
           },
           clearSecrets() {
-            this.set({ asrKey: '', asrBaseUrl: '', deepseekKey: '', deepseekBaseUrl: '' })
+            this.set({ asrKey: '', asrBaseUrl: '', deepseekKey: '', deepseekBaseUrl: '', volcAppId: '', volcAccessToken: '', volcCluster: '' })
           },
           subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn) },
         })
@@ -579,29 +616,44 @@ window.__ModuleLoader__.load({
           } catch (e) {}
         }
 
-        // v59：启动时从 Host 拉取跨浏览器设置——服务端优先合并进本地并写回 localStorage；
+        // v62：启动时从 Host 拉取跨浏览器设置——服务端优先合并进本地并写回 localStorage；
         // 合并后总是写回服务端，保证「服务端 ∪ 本地」一致（首次迁移不因浏览器打开顺序丢 Key）。
         {
           const v0 = voiceRemote()
           if (v0 && typeof v0.getPrefs === 'function') {
             v0.getPrefs().then((res) => {
               if (!res || !res.ok || !res.prefs || typeof res.prefs !== 'object') {
+                notifyPrefsSync((res && res.error) || '读取本机设置失败')
                 schedulePrefsPush()
                 return
               }
+              notifyPrefsSync('')
               const patch = {}
               for (const k of PERSISTED_KEYS) {
                 if (typeof res.prefs[k] !== 'undefined') patch[k] = res.prefs[k]
               }
               if (Object.keys(patch).length) prefs.set(patch)
               schedulePrefsPush()
-            }).catch(() => {})
+            }).catch((err) => {
+              notifyPrefsSync((err && (err.message || err.error)) || '读取本机设置失败')
+            })
+          } else {
+            notifyPrefsSync('本机服务未连接')
           }
         }
         const usePrefs = () => {
           const [, bump] = React.useState(0)
           React.useEffect(() => prefs.subscribe(() => bump((v) => v + 1)), [])
           return prefs.get()
+        }
+        const usePrefsSync = () => {
+          const [, bump] = React.useState(0)
+          React.useEffect(() => {
+            const fn = () => bump((v) => v + 1)
+            prefsSyncListeners.add(fn)
+            return () => prefsSyncListeners.delete(fn)
+          }, [])
+          return prefsSyncError
         }
         const fmtErr = (e) => {
           if (typeof e === 'string') return e
@@ -703,10 +755,12 @@ window.__ModuleLoader__.load({
                 for (let i = 0; i < d.length; i++) sum += d[i] * d[i]
                 const rms = Math.sqrt(sum / d.length)
                 if (calibMs < 300) {
-                  // v26：校准期检测到明显声音（开麦瞬间人已开口）→ 重置校准，
-                  // 基线只取纯静音均值，避免阈值被语音污染导致整句漏检
+                  // v61：校准期不再丢弃音频——静音块进滚动 preBuf（pre-roll 缓冲）；
+                  // 检测到开口（rms>0.03）立即结束校准（用默认基线 0.01），不再无限重置丢弃——
+                  // 原 v26 逻辑在「开麦即开口」时反复重置并丢弃音频，导致首句整段丢失；
+                  // 开口块本身不重复进 preBuf（fallthrough 后由 VAD 直接收入 speechBuf）
                   if (rms > 0.03) {
-                    calibMs = 0
+                    calibMs = 300 // 开口 → 立即结束校准，fallthrough 用当前块触发 VAD
                     calib = []
                   } else {
                     calib.push(rms)
@@ -717,8 +771,10 @@ window.__ModuleLoader__.load({
                       baseline = s / calib.length
                       calib = []
                     }
+                    preBuf.push(new Float32Array(d))
+                    if (preBuf.length > PRE_ROLL_BLOCKS) preBuf.shift()
                   }
-                  return
+                  if (calibMs < 300) return
                 }
                 thr = Math.max(baseline * 3, 0.008) // v52：更新外层阈值，flush 裁剪与 VAD 判断一致
                 if (rms > thr) {
@@ -1008,7 +1064,9 @@ window.__ModuleLoader__.load({
           prefsRef.current = p
           if (lastCommittedRef.current && lastCommittedRef.current.draft !== draft) {
             lastCommittedRef.current = null
-            lastChunkRef.current = null
+            // v61：不再清空 lastChunkRef（保留重定位锚点）；插入点锚定到当前草稿末尾，
+            // 避免后续块插入到 AI 精修/外部改动后的过期坐标（原 bug：重复/错位堆积）
+            insPointRef.current = draft.length
           }
 
           React.useEffect(() => {
@@ -1029,18 +1087,19 @@ window.__ModuleLoader__.load({
             if (!v || typeof v.warm !== 'function') return Promise.resolve({ ok: false, unavailable: true })
             const isFunasr = pre.engine === 'funasr'
             const model = isFunasr ? 'paraformer-zh' : (pre.model || 'base')
+            const warmKey = (pre.modelRoot || '') + '|' + (isFunasr ? 'funasr' : 'local') + '|' + model
             const st = warmStateRef.current
-            if (st[model] === 'done') return Promise.resolve({ ok: true, cached: true })
-            if (warmPendingRef.current[model]) return warmPendingRef.current[model]
-            const p = v.warm({ model, backend: isFunasr ? 'funasr' : 'local' }).then((r) => {
-              st[model] = (r && r.ok) ? 'done' : 'failed'
+            if (st[warmKey] === 'done') return Promise.resolve({ ok: true, cached: true })
+            if (warmPendingRef.current[warmKey]) return warmPendingRef.current[warmKey]
+            const p = v.warm({ model, backend: isFunasr ? 'funasr' : 'local', modelRoot: pre.modelRoot || '' }).then((r) => {
+              st[warmKey] = (r && r.ok) ? 'done' : 'failed'
               return r || { ok: false }
             }).catch((err) => {
-              st[model] = 'failed'
+              st[warmKey] = 'failed'
               return { ok: false, error: String((err && err.message) || err) }
             })
-            warmPendingRef.current[model] = p
-            const settle = () => { if (warmPendingRef.current[model] === p) delete warmPendingRef.current[model] }
+            warmPendingRef.current[warmKey] = p
+            const settle = () => { if (warmPendingRef.current[warmKey] === p) delete warmPendingRef.current[warmKey] }
             p.then(settle, settle)
             return p
           }, [])
@@ -1048,12 +1107,25 @@ window.__ModuleLoader__.load({
           React.useEffect(() => {
             // 选择本地/FunASR 引擎 / 切换本地模型的那一刻就预热，把冷启动挪到说话之前
             if (p.engine === 'local' || p.engine === 'funasr') warmLocal()
-          }, [p.engine, p.model, warmLocal])
+          }, [p.engine, p.model, p.modelRoot, warmLocal])
 
           // v52：引擎/模型切换时销毁常驻 worker——whisper 与 FunASR 不同时驻留
           //（每个模型 ~1-1.6GB）；切到浏览器内置 ASR / 云 ASR 时同样销毁释放内存。
           // 成功后清空预热状态，下次使用会重新加载（首次稍慢但内存干净）。
+          // v61：修复「换对话后首次说话重新加载」——原效果在每次挂载（新对话输入栏
+          // 挂载）时都执行 resetWorker，把已加载模型销毁；改为仅当引擎/模型真的变化
+          // 时才销毁（prev ref 跳过首次挂载与纯重渲染）。
+          const prevEngineRef = React.useRef(null)
+          const prevModelRef = React.useRef(null)
+          const prevModelRootRef = React.useRef(null)
           React.useEffect(() => {
+            const engineChanged = prevEngineRef.current !== null && prevEngineRef.current !== p.engine
+            const modelChanged = prevModelRef.current !== null && prevModelRef.current !== p.model
+            const modelRootChanged = prevModelRootRef.current !== null && prevModelRootRef.current !== p.modelRoot
+            prevEngineRef.current = p.engine
+            prevModelRef.current = p.model
+            prevModelRootRef.current = p.modelRoot
+            if (!engineChanged && !modelChanged && !modelRootChanged) return // 首次挂载/换对话：保留已加载 worker
             const v = voiceRemote()
             if (!v || typeof v.resetWorker !== 'function') return
             let alive = true
@@ -1063,7 +1135,7 @@ window.__ModuleLoader__.load({
               warmPendingRef.current = {}
             }).catch(() => {})
             return () => { alive = false }
-          }, [p.engine, p.model])
+          }, [p.engine, p.model, p.modelRoot])
 
           React.useEffect(() => {
             const isComposer = (el) => {
@@ -1159,7 +1231,7 @@ window.__ModuleLoader__.load({
             const after = cur.slice(end, end + 60)
             // v53：聊天语境可开关（prefs.polishContext，默认开）——关闭时省输入 token
             const chatCtx = pre.polishContext ? chatContextFromSession(chatRef.current) : ''
-            v.polish({ text, before, after, context: chatCtx, prompt: pre.polishPrompt || '', apiKey: pre.deepseekKey, baseUrl: pre.deepseekBaseUrl }).then((r2) => {
+            v.polish({ text, before, after, context: chatCtx, prompt: pre.polishPrompt || '', apiKey: pre.deepseekKey, baseUrl: pre.deepseekBaseUrl, modelRoot: pre.modelRoot || '' }).then((r2) => {
               if (!r2) return
               if (!r2.ok) { setStatusSafe(t('status.polishFail', { err: fmtErr(r2.error || t('err.unknown')) })); return }
               if (typeof r2.text !== 'string' || !r2.text || r2.text === text) return
@@ -1307,9 +1379,16 @@ window.__ModuleLoader__.load({
             if (!chunk) return
             const a = actionsRef.current
             if (!a || typeof a.setDraft !== 'function') return
-            const last = lastCommittedRef.current
-            const cur = (last && typeof last.draft === 'string') ? last.draft : draftRef.current
-            const at = Math.max(0, Math.min(last ? last.at : (insPointRef.current || cur.length), cur.length))
+            const cur = draftRef.current
+            // v61：优先按上一块文本在最新草稿中重定位插入点（AI精修/外部改动后自愈，
+            // 不再依赖会被精修改失效的绝对偏移）；找不到锚点则回退到 insPointRef
+            //（外部改动时已被锚定到草稿末尾 → 追加，杜绝重复/错位堆积）
+            let at = null
+            if (lastChunkRef.current && typeof lastChunkRef.current.text === 'string' && lastChunkRef.current.text) {
+              const idx = cur.lastIndexOf(lastChunkRef.current.text)
+              if (idx >= 0) at = idx + lastChunkRef.current.text.length
+            }
+            if (at == null) at = Math.max(0, Math.min(insPointRef.current || cur.length, cur.length))
             const prefix = cur.slice(0, at)
             const suffix = cur.slice(at)
             const leftCJK = isCJK(prefix.slice(-1))
@@ -1520,6 +1599,7 @@ window.__ModuleLoader__.load({
                     volcAppId: pre.engine === 'volc' ? pre.volcAppId : '',
                     volcAccessToken: pre.engine === 'volc' ? pre.volcAccessToken : '',
                     volcCluster: pre.engine === 'volc' ? pre.volcCluster : '',
+                    modelRoot: pre.modelRoot || '',
                   })
                 }).then((res) => {
                   if (sessionRef.current !== mySession) return
@@ -1784,9 +1864,8 @@ window.__ModuleLoader__.load({
             const tick = () => {
               if (sessionRef.current !== mySession) { if (timer) clearInterval(timer); return }
               const secs = Math.max(0, Math.floor((Date.now() - t0) / 1000))
-              // v58：显示音频时长（尾裁后），耗时透明
-              const a = Math.round(seconds)
-              setStatusSafe(secs < 5 ? t('status.recognizingAudio', { a }) : t('status.recognizingAudioSec', { a, e: secs }))
+              // v61：识别状态精简——始终「正在识别…」，仅超 5s 追加「（已用 Ns）」
+              setStatusSafe(secs < 5 ? t('status.recognizing') : t('status.recognizingElapsed', { e: secs }))
             }
             tick()
             timer = setInterval(tick, 5000)
@@ -1806,6 +1885,7 @@ window.__ModuleLoader__.load({
                 volcAppId: pre.engine === 'volc' ? pre.volcAppId : '',
                 volcAccessToken: pre.engine === 'volc' ? pre.volcAccessToken : '',
                 volcCluster: pre.engine === 'volc' ? pre.volcCluster : '',
+                modelRoot: pre.modelRoot || '',
               })
             }).then((r2) => {
               clearInterval(timer)
@@ -1926,8 +2006,10 @@ window.__ModuleLoader__.load({
           else if (c.mode === 'stream') title = c.listening ? t('ui.streamStop') : t('ui.streamStart')
           else title = c.listening ? t('ui.dictStop') : t('ui.dictStart')
           return React.createElement('div', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px' } },
-            (c.recognizing || c.listening) && (c.waveLevels.length || c.waveFinal.length)
-              ? React.createElement(Waveform, { levels: c.recognizing ? c.waveFinal : c.waveLevels, anim: c.recognizing, live: !c.recognizing })
+            // v61：识别中不再渲染波形——波形仅在录音中显示（实时红色短波形），
+            // 停止进入识别后输入栏保持干净（只留状态文案 + 🎤⚙）
+            (c.listening && c.waveLevels.length)
+              ? React.createElement(Waveform, { levels: c.waveLevels, live: true })
               : null,
             c.status
               ? React.createElement('span', { className: 'vi-status' + (c.isError ? '' : ' info') }, c.status)
@@ -1961,6 +2043,8 @@ window.__ModuleLoader__.load({
           const [localModels, setLocalModels] = React.useState(null)
           const [modelErr, setModelErr] = React.useState('')
           const [downloading, setDownloading] = React.useState('')
+          const [modelRootDraft, setModelRootDraft] = React.useState(p.modelRoot || '')
+          const syncError = usePrefsSync()
           // v38：引擎说明折叠区（每条 ≤20 字）
           const [explainOpen, setExplainOpen] = React.useState(false)
           // v58：弹窗自适应最大高度——按输入栏上方实际可用空间测量，
@@ -2002,25 +2086,29 @@ window.__ModuleLoader__.load({
             return () => document.removeEventListener('pointerdown', onPointerDown, true)
           }, [p.settingsOpen])
           React.useEffect(() => {
+            if (!p.settingsOpen) return
             const v = voiceRemote()
-            if (!v || typeof v.listModels !== 'function') return
+            if (!v || typeof v.listModels !== 'function') { setModelErr(t('set.modelListFail')); return }
             let alive = true
-            v.listModels().then((res) => {
+            v.listModels({ modelRoot: p.modelRoot || '' }).then((res) => {
               if (!alive) return
               if (res && res.ok && Array.isArray(res.models)) setLocalModels(res)
               else setModelErr((res && res.error) || t('set.modelListFail'))
-            }).catch(() => { if (alive) setModelErr(t('set.modelListFail')) })
+            }).catch((e) => { if (alive) setModelErr(t('set.modelListFail') + ': ' + fmtErr(e)) })
             return () => { alive = false }
-          }, [p.settingsOpen])
+          }, [p.settingsOpen, p.modelRoot])
+          React.useEffect(() => {
+            setModelRootDraft(p.modelRoot || '')
+          }, [p.modelRoot])
           const doDownload = (m) => {
             const v = voiceRemote()
             if (!v || typeof v.downloadModel !== 'function' || downloading) return
             setDownloading(m)
             setModelErr('')
-            v.downloadModel({ model: m }).then((res) => {
+            v.downloadModel({ model: m, modelRoot: p.modelRoot || '' }).then((res) => {
               setDownloading('')
               if (res && res.ok) {
-                v.listModels().then((r2) => { if (r2 && r2.ok && Array.isArray(r2.models)) setLocalModels(r2) })
+                v.listModels({ modelRoot: p.modelRoot || '' }).then((r2) => { if (r2 && r2.ok && Array.isArray(r2.models)) setLocalModels(r2) })
               } else {
                 setModelErr(t('set.downloadFail', { err: (res && res.error) || t('err.unknown') }))
               }
@@ -2119,6 +2207,7 @@ window.__ModuleLoader__.load({
               // 浏览器内置 ASR / FunASR / 云 ASR 无此参数，禁用并显示「不适用」
               field(t('set.quality'), mkSel(p.engine === 'local' ? String(p.beam) : '__na__', p.engine === 'local' ? [{ id: '1', label: t('set.qualityFast') }, { id: '5', label: t('set.qualityHigh') }] : [{ id: '__na__', label: t('set.qualityNa') }], (v) => { if (v !== '__na__') prefs.set({ beam: Number(v) }) }, p.engine !== 'local'))
             ),
+            syncError ? React.createElement('div', { className: 'vi-set-hint', 'data-error': true }, t('set.storageSyncError', { err: syncError })) : null,
             React.createElement('div', { className: 'vi-pop-toggles' },
               React.createElement('button', {
                 className: 'vi-toggle', type: 'button',
@@ -2205,7 +2294,24 @@ window.__ModuleLoader__.load({
             ),
             modelOpen
               ? React.createElement('div', { className: 'vi-set-field vi-set-wide' },
-                  // v47：存储位置行已移入引擎说明；此处仅模型列表（随引擎联动）
+                  // v62：模型缓存目录可由用户指定；空值保留旧版工作区默认目录。
+                  field(t('set.modelPath'), React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+                    mkInput(modelRootDraft, (v) => setModelRootDraft(v), t('set.modelPathPh')),
+                    React.createElement('button', {
+                      className: 'vi-clear-btn', type: 'button',
+                      disabled: modelRootDraft === (p.modelRoot || '') ? true : undefined,
+                      onClick: () => prefs.set({ modelRoot: (modelRootDraft || '').trim() }),
+                    }, t('set.modelPathApply')),
+                    React.createElement('button', {
+                      className: 'vi-clear-btn', type: 'button',
+                      disabled: !modelRootDraft ? true : undefined,
+                      onClick: () => { setModelRootDraft(''); prefs.set({ modelRoot: '' }) },
+                    }, t('set.modelPathReset'))
+                  )),
+                  React.createElement('div', { className: 'vi-set-hint' }, t('set.modelPathHint')),
+                  localModels && localModels.modelRoot
+                    ? React.createElement('div', { className: 'vi-set-hint' }, t('set.modelPathDefault', { path: localModels.modelRoot }))
+                    : null,
                   localModels
                     ? localModels.models
                         .filter((m) => p.engine === 'funasr' ? m.backend === 'funasr' : (p.engine === 'local' ? m.backend === 'local' : true))
@@ -2245,7 +2351,7 @@ window.__ModuleLoader__.load({
                   React.createElement('div', { className: 'vi-set-hint', title: t('set.explainWhisperTitle') }, t('set.explainWhisper')),
                   React.createElement('div', { className: 'vi-set-hint', title: t('set.explainFunasrTitle') }, t('set.explainFunasr')),
                   React.createElement('div', { className: 'vi-set-hint', title: t('set.explainRecoverTitle') }, t('set.explainRecover')),
-                  // v55：模型存储位置行已删除（用户认为无用）
+                  // v62：模型目录已放回模型管理面板，便于按需下载时确认落盘位置
                   React.createElement('div', { className: 'vi-set-hint', title: t('set.explainCloudTitle') }, t('set.explainCloud')),
                   React.createElement('div', { className: 'vi-set-hint' }, t('set.explainPunct')),
                   React.createElement('div', { className: 'vi-set-hint' }, t('set.explainPolish')),

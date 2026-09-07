@@ -2,6 +2,8 @@
 
 在 DSH 输入栏直接语音输入文字：支持实时听写和整段录音，识别引擎可选浏览器内置 ASR、本地 whisper、FunASR 或云服务，识别后还可以使用 AI 精修。
 
+当前实现：v62（设置跨浏览器持久化、模型目录可选、模型按需下载、安装/部署入口统一）。
+
 [![License](https://img.shields.io/github/license/Rio-promax/dsh-voice-input)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Rio-promax/dsh-voice-input)](https://github.com/Rio-promax/dsh-voice-input/releases)
 
@@ -89,7 +91,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 1. **定位 DSH 配置**：优先使用 -DshRoot，其次使用 DSH_HOME，最后使用默认目录 %USERPROFILE%\.dsh。
 2. **复制插件**：把插件真实复制到 <DSH>\profiles\node_modules\dsh-plugin-voice-input，不会使用 junction。
 3. **注册组合**：创建或增量更新 profiles\web\cordis.patch.yml；已有内容会保留，必要时自动生成 .bak-* 备份。
-4. **安装 Python 环境**：调用 voice-input-plugin\setup.ps1，创建 .venv、安装依赖，并默认预下载 FunASR 的 ASR + VAD 模型。
+4. **安装 Python 环境**：调用 voice-input-plugin\setup.ps1，创建 .venv、安装依赖；默认不下载大模型，模型在设置面板中按需下载。
 5. **输出重启提示**：脚本完成后才启动 DSH；安装脚本本身不会启动 DSH。
 
 ### 5. 常用参数
@@ -101,14 +103,17 @@ pwsh -ExecutionPolicy Bypass -File .\install.ps1 -DshRoot 'C:\path\to\.dsh'
 # 使用国内 PyPI 镜像
 pwsh -ExecutionPolicy Bypass -File .\install.ps1 -Mirror 'https://pypi.tuna.tsinghua.edu.cn/simple'
 
-# 先完成插件注册和 Python 依赖安装，但跳过 FunASR 预下载
+# 先完成插件注册和 Python 依赖安装（模型默认不下载）
 pwsh -ExecutionPolicy Bypass -File .\install.ps1 -SkipModels
+
+# 明确预下载模型，并指定模型目录（可选）
+pwsh -ExecutionPolicy Bypass -File .\install.ps1 -WithModels -ModelRoot 'E:\DSH\models'
 
 # 只需要浏览器内置 ASR 时，可跳过 Python；本地 whisper/FunASR 将不可用
 pwsh -ExecutionPolicy Bypass -File .\install.ps1 -SkipPython
 ~~~
 
-如果使用 -SkipModels，第一次选择本地 FunASR 时仍会下载模型；如果使用 -SkipPython，之后要手动运行 voice-input-plugin\setup.ps1 才能启用本地引擎。
+模型下载是按需的：打开「设置 → 本地模型管理」可指定目录并下载 Whisper/FunASR；也可用 -WithModels 预下载。如果使用 -SkipPython，之后要手动运行 voice-input-plugin\setup.ps1 才能启用本地引擎。
 
 ### 6. 启动 DSH
 
@@ -170,7 +175,7 @@ cd /path/to/dsh-voice-input
 bash ./voice-input-plugin/setup.sh
 ~~~
 
-这条命令会**立即在当前 Terminal 前台同步执行**：创建 .venv、安装依赖，并默认下载 FunASR 的 ASR + VAD + 标点模型（约 0.9GB，首次可能较慢）。不要关闭 Terminal；看到“安装完成”后才继续下一步。
+这条命令会**立即在当前 Terminal 前台同步执行**：创建 .venv、安装依赖；默认不下载大模型。模型可在设置面板中按需选择目录并下载。不要关闭 Terminal；看到“安装完成”后才继续下一步。
 
 网络受限时可指定镜像，或跳过模型预下载：
 
@@ -178,8 +183,11 @@ bash ./voice-input-plugin/setup.sh
 # 使用国内 PyPI 镜像
 bash ./voice-input-plugin/setup.sh -m https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 跳过 FunASR 模型预下载，第一次使用时再下载
+# 模型默认按需下载；也可显式跳过预下载（兼容旧参数）
 bash ./voice-input-plugin/setup.sh --skip-models
+
+# 明确预下载，并把模型放到指定目录
+bash ./voice-input-plugin/setup.sh --with-models --model-root /mnt/dsh-models
 ~~~
 
 ### 4. 自动部署插件
@@ -346,8 +354,10 @@ Chrome 的完整说明见 [Google Chrome：使用摄像头和麦克风](https://
 | DSH_VOICE_PYTHON | 根目录下的 .venv Python | 指定 Python 解释器。 |
 | DSH_HOME | Windows %USERPROFILE%\.dsh；macOS ~/.dsh | 指定 DSH 配置根目录。 |
 | DSH_HF_ENDPOINT | https://hf-mirror.com | Hugging Face 下载源；海外可设置为 https://huggingface.co。 |
-| HF_HOME | 根目录下的 .hf | whisper 模型缓存。 |
-| MODELSCOPE_CACHE | 根目录下的 .modelscope | FunASR 模型缓存。 |
+| DSH_VOICE_DATA_ROOT | DSH_HOME/voice-input 或用户目录 .dsh/voice-input | 跨浏览器设置文件 `.voice-prefs.json`。 |
+| DSH_MODEL_ROOT | 未设置时使用模型目录默认值 | 可选的模型缓存根目录；设置面板中的目录优先。 |
+| HF_HOME | 模型目录下的 .hf | whisper 模型缓存（Host 按设置目录注入）。 |
+| MODELSCOPE_CACHE | 模型目录下的 .modelscope | FunASR 模型缓存（Host 按设置目录注入）。 |
 | DSH_ASR_API_KEY / DSH_ASR_BASE_URL | — | OpenAI 兼容云 ASR。 |
 | DSH_DEEPSEEK_API_KEY | — | AI 精修。 |
 | DSH_VOLC_APPID / DSH_VOLC_ACCESS_TOKEN | — | 豆包云 ASR。 |
@@ -355,8 +365,8 @@ Chrome 的完整说明见 [Google Chrome：使用摄像头和麦克风](https://
 ## 隐私与限制
 
 - 本地识别（whisper/FunASR）不会把音频发送到云端；云 ASR 和 AI 精修会把对应音频或文本发送给服务商。
-- API Key 保存在浏览器本机的 localStorage 中；分发时不要内置任何 Key。
-- 首次选择本地引擎可能需要下载模型，期间会显示预热或下载提示。
+- API Key 保存在本机 Host 数据目录的 `.voice-prefs.json` 中，localStorage 只作离线缓存；分发时不要内置任何 Key。
+- 选择本地引擎后可在「本地模型管理」中指定目录并按需下载，期间会显示预热或下载提示。
 - FunASR 主要面向普通话；whisper 支持多语言；整段模式单次录音上限为 10 分钟。
 - 组件许可清单见 [voice-input-plugin/DISTRIBUTION.md](voice-input-plugin/DISTRIBUTION.md)。
 
@@ -453,7 +463,7 @@ The script runs the following steps in order; each ==> line shows the current pr
 1. **Locate DSH config**: It uses -DshRoot first, then DSH_HOME, then %USERPROFILE%\.dsh.
 2. **Copy the plugin**: It copies the plugin to <DSH>\profiles\node_modules\dsh-plugin-voice-input and does not use a junction.
 3. **Register the bundle**: It creates or incrementally updates profiles\web\cordis.patch.yml, preserving existing entries and creating a .bak-* backup when needed.
-4. **Install the Python environment**: It calls voice-input-plugin\setup.ps1 to create .venv, install dependencies, and pre-download the FunASR ASR + VAD models by default.
+4. **Install the Python environment**: It calls voice-input-plugin\setup.ps1 to create .venv and install dependencies; large models are not downloaded by default.
 5. **Print the restart prompt**: Start DSH only after the script finishes; the installer itself does not start DSH.
 
 ### 5. Common options
@@ -465,14 +475,17 @@ pwsh -ExecutionPolicy Bypass -File .\install.ps1 -DshRoot 'C:\path\to\.dsh'
 # Use a mainland-China PyPI mirror
 pwsh -ExecutionPolicy Bypass -File .\install.ps1 -Mirror 'https://pypi.tuna.tsinghua.edu.cn/simple'
 
-# Register the plugin and install Python dependencies without pre-downloading models
+# Register the plugin and install Python dependencies (models are not downloaded by default)
 pwsh -ExecutionPolicy Bypass -File .\install.ps1 -SkipModels
+
+# Explicitly pre-download models to a chosen directory (optional)
+pwsh -ExecutionPolicy Bypass -File .\install.ps1 -WithModels -ModelRoot 'E:\DSH\models'
 
 # Skip Python only if browser ASR is sufficient; local whisper/FunASR will be unavailable
 pwsh -ExecutionPolicy Bypass -File .\install.ps1 -SkipPython
 ~~~
 
-With -SkipModels, the model is still downloaded the first time local FunASR is selected. With -SkipPython, run voice-input-plugin\setup.ps1 later to enable local backends.
+Model downloads are on demand: open Settings → Local Model Management to choose a directory and download Whisper/FunASR, or use -WithModels. With -SkipPython, run voice-input-plugin\setup.ps1 later to enable local backends.
 
 ### 6. Start DSH
 
@@ -534,7 +547,7 @@ Stop any running DSH instance first, then run:
 bash ./voice-input-plugin/setup.sh
 ~~~
 
-This command **runs immediately and synchronously in the foreground of the current Terminal**. It creates .venv, installs dependencies, and by default downloads the FunASR ASR + VAD + punctuation models (about 0.9GB; the first run may be slow). Keep Terminal open and continue only after “安装完成” (installation complete) appears.
+This command **runs immediately and synchronously in the foreground of the current Terminal**. It creates .venv and installs dependencies; large models are not downloaded by default. Choose a directory in Local Model Management and download on demand. Keep Terminal open and continue only after “安装完成” (installation complete) appears.
 
 On restricted networks, use a mirror or skip model pre-download:
 
@@ -542,8 +555,11 @@ On restricted networks, use a mirror or skip model pre-download:
 # Use a mainland-China PyPI mirror
 bash ./voice-input-plugin/setup.sh -m https://pypi.tuna.tsinghua.edu.cn/simple
 
-# Skip FunASR pre-download; download on first use instead
+# Models are on demand; this compatibility flag explicitly skips pre-download
 bash ./voice-input-plugin/setup.sh --skip-models
+
+# Explicitly pre-download to a chosen directory (optional)
+bash ./voice-input-plugin/setup.sh --with-models --model-root /mnt/dsh-models
 ~~~
 
 ### 4. Deploy the plugin automatically
@@ -710,8 +726,10 @@ If the browser is not listed in the macOS microphone panel, click 🎤 once in D
 | DSH_VOICE_PYTHON | Python inside the root .venv | Override the Python interpreter. |
 | DSH_HOME | Windows %USERPROFILE%\.dsh; macOS ~/.dsh | Set the DSH config root. |
 | DSH_HF_ENDPOINT | https://hf-mirror.com | Hugging Face endpoint; outside mainland China, set it to https://huggingface.co. |
-| HF_HOME | .hf inside the root | whisper model cache. |
-| MODELSCOPE_CACHE | .modelscope inside the root | FunASR model cache. |
+| DSH_VOICE_DATA_ROOT | DSH_HOME/voice-input or ~/.dsh/voice-input | Cross-browser `.voice-prefs.json` directory. |
+| DSH_MODEL_ROOT | Default model directory when unset | Optional model-cache root; the directory chosen in Settings takes priority. |
+| HF_HOME | .hf inside the selected model directory | whisper model cache (injected by Host). |
+| MODELSCOPE_CACHE | .modelscope inside the selected model directory | FunASR model cache (injected by Host). |
 | DSH_ASR_API_KEY / DSH_ASR_BASE_URL | — | OpenAI-compatible cloud ASR. |
 | DSH_DEEPSEEK_API_KEY | — | AI polishing. |
 | DSH_VOLC_APPID / DSH_VOLC_ACCESS_TOKEN | — | Doubao cloud ASR. |
@@ -719,8 +737,8 @@ If the browser is not listed in the macOS microphone panel, click 🎤 once in D
 ## Privacy and limitations
 
 - Local whisper/FunASR keep audio on the machine; cloud ASR and AI polishing send the relevant audio or text to their providers.
-- API keys are stored in the browser's localStorage; never bundle a key when distributing the plugin.
-- The first use of a local backend may download models and show a warm-up or download status.
+- API keys are stored in the local Host data directory's `.voice-prefs.json`; localStorage is only an offline cache. Never bundle a key when distributing the plugin.
+- Local models are downloaded on demand to the directory chosen in Local Model Management and show warm-up/download status.
 - FunASR is primarily for Mandarin; whisper supports multiple languages; batch recordings are limited to 10 minutes.
 - See [voice-input-plugin/DISTRIBUTION.md](voice-input-plugin/DISTRIBUTION.md) for the component license list.
 

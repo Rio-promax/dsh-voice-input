@@ -4,6 +4,7 @@
 #   pwsh -File install.ps1                                          # 自动定位 DSH profiles 并安装
 #   pwsh -File install.ps1 -DshRoot C:\Users\me\.dsh                # 手动指定 DSH 配置目录
 #   pwsh -File install.ps1 -SkipPython                              # 跳过 Python 依赖安装
+#   pwsh -File install.ps1 -WithModels -ModelRoot E:\DSH\models      # 明确预下载模型到指定目录
 #   pwsh -File install.ps1 -Mirror https://pypi.tuna.tsinghua.edu.cn/simple
 # 作用：
 #   ① 复制插件包到 <DSH>\profiles\node_modules\dsh-plugin-voice-input
@@ -16,7 +17,9 @@
 param(
   [string]$DshRoot = "",
   [switch]$SkipPython,
+  [switch]$WithModels,
   [switch]$SkipModels,
+  [string]$ModelRoot = "",
   [string]$Mirror = ""
 )
 $ErrorActionPreference = 'Stop'
@@ -83,11 +86,12 @@ if (Test-Path $patch) {
   Write-Host "==> 组合已创建: $patch"
 }
 
-# 3) Python 依赖（可选跳过；setup.ps1 会建 .venv、装 requirements、可选预下载模型）
+# 3) Python 依赖（可选跳过；模型默认不下载，-WithModels 才预下载）
 if (-not $SkipPython) {
   $setupArgs = @()
   if ($Mirror) { $setupArgs += @('-Mirror', $Mirror) }
-  if ($SkipModels) { $setupArgs += @('-SkipModels') }
+  if ($ModelRoot) { $setupArgs += @('-ModelRoot', $ModelRoot) }
+  if ($WithModels -and -not $SkipModels) { $setupArgs += @('-WithModels') } else { $setupArgs += @('-SkipModels') }
   & (Join-Path $pkg 'setup.ps1') @setupArgs
   if ($LASTEXITCODE -ne 0) { throw 'Python 依赖安装失败（可 -SkipPython 跳过，之后手动运行 setup.ps1）' }
 } else {
@@ -98,6 +102,7 @@ if (-not $SkipPython) {
 Write-Host ""
 Write-Host "==> 安装完成 ✅  请重启 dsh（先停旧实例，再运行 npx @deepseek-ai/dsh web）"
 Write-Host "    重启后输入栏右侧应出现 🎤 ⚙ 按钮"
+Write-Host "    模型不会随本体自动下载；打开设置 → 本地模型管理后可选择保存目录并按需下载"
 Write-Host ""
 Write-Host "  语音组件根目录（含 .voice-asr 与 .venv）解析方式，二选一："
 Write-Host "    A. 推荐：把 dsh 会话工作区设置为本仓库根目录：$src"

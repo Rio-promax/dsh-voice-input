@@ -21,7 +21,8 @@ Environment:
   HF_ENDPOINT       - huggingface mirror (default hf-mirror.com; 海外可设
                       DSH_HF_ENDPOINT=https://huggingface.co 覆盖)
   DSH_VOICE_ROOT    - 语音组件根目录（默认当前工作目录）
-  MODELSCOPE_CACHE  - FunASR 模型缓存（默认 <root>/.modelscope）
+  MODELSCOPE_CACHE  - FunASR 模型缓存（默认 <model-root>/.modelscope）
+  DSH_MODEL_ROOT    - 模型缓存根（Host/UI 会通过缓存环境变量注入）
 """
 import base64
 import io
@@ -33,11 +34,13 @@ import time
 os.environ.setdefault("HF_ENDPOINT", os.environ.get("DSH_HF_ENDPOINT") or "https://hf-mirror.com")
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 # v37 可移植化：模型缓存默认落在工作区内（whisper 用 HF_HOME=.hf，由 Host 侧注入；
-# ModelScope 缓存默认 <root>/.modelscope，FunASR 用；SDK 会话目录默认 <root>/.modelscope-home）；
+# ModelScope 缓存默认 <model-root>/.modelscope，FunASR 用；SDK 会话目录默认 <model-root>/.modelscope-home）；
 # 三者均可被用户环境变量覆盖（MODELSCOPE_HOME 必须指向可写目录）。
 _voice_root = os.environ.get("DSH_VOICE_ROOT") or os.getcwd()
-os.environ.setdefault("MODELSCOPE_CACHE", os.path.join(_voice_root, ".modelscope"))
-os.environ.setdefault("MODELSCOPE_HOME", os.path.join(_voice_root, ".modelscope-home"))
+_model_root = os.environ.get("DSH_MODEL_ROOT") or _voice_root
+os.environ.setdefault("HF_HOME", os.path.join(_model_root, ".hf"))
+os.environ.setdefault("MODELSCOPE_CACHE", os.path.join(_model_root, ".modelscope"))
+os.environ.setdefault("MODELSCOPE_HOME", os.path.join(_model_root, ".modelscope-home"))
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -143,7 +146,7 @@ def probe():
                 "label": "FunASR 中文（免费·离线·ONNX）",
                 "available": funasr_ok,
                 "models": FUNASR_MODELS,
-                "hint": "阿里达摩院开源中文模型（paraformer-zh），中文识别明显优于 whisper base/small；首次使用自动下载（ModelScope，约 450MB + 标点模型）",
+                "hint": "阿里达摩院开源中文模型（paraformer-zh），中文识别明显优于 whisper base/small；模型按需下载（ModelScope，约 450MB + 标点模型）",
             },
             {
                 "id": "openai",
@@ -461,7 +464,10 @@ def list_local_models():
         funasr_models.append({
             "id": m,
             "backend": "funasr",
-            "downloaded": os.path.isdir(marker),
+            # A ModelScope directory can exist while a download is still
+            # incomplete.  The snapshots marker is the same readiness check
+            # used above and avoids presenting a partial model as usable.
+            "downloaded": downloaded,
             "params": info.get("params", ""),
             "size": info.get("size", ""),
             "note": info.get("note", ""),

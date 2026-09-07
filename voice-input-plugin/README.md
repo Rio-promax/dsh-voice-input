@@ -1,12 +1,14 @@
 # 语音输入插件 · 恢复与部署说明
 
-## 一、现状（v60：界面中英文切换 —— 已部署 ✅）
+## 一、现状（v62：设置、部署与模型路径重构 —— 工作区待部署）
 
-- 插件 ID：`vmic-1`（已部署静态版 v60，重启自动加载；本目录 `client.js`/`host.js` 快照 = 部署版 `lib/` 副本）
+- 插件 ID：`vmic-1`（工作区源与分发副本为 v62；外部 DSH profiles 未自动写入，需用户明确批准后再部署）
 - 界面：输入栏右侧（模型选择旁）两个小按钮——🎤 麦克风、⚙ 设置
 - ⚙ 浮层设置：引擎（**浏览器内置 ASR 识别 / 本地 base whisper / 本地FunASR / 云 ASR**）→ 模型 → 语言 → 质量 + 标点/AI精修/**语境**/**整段**；API 配置折叠式；「本地模型管理」「引擎说明」可折叠；底部一行左侧「清除保存的 Key」、右侧「**中 | EN**」界面语言分段开关（选中侧绿色）
+- **v62（本轮重构，工作区待部署）**：① 设置改存 DSH 数据目录（`DSH_VOICE_DATA_ROOT` / `DSH_HOME` / 用户目录自动推导），原子写入并限制白名单字段，Chrome/Edge/豆包等浏览器共享；客户端保留 localStorage 缓存，Host 读写失败在设置中红字提示。② 模型管理新增可编辑保存目录，空值沿用 ASR 工作区，目录可在其他磁盘；Whisper/FunASR 的缓存环境变量随目录传给 Python worker 与按需下载命令。③ 安装脚本默认只安装 Python 依赖、不预下载大模型，`-WithModels` 才预下载；模型目录可通过 `-ModelRoot` 指定。④ `deploy.ps1` 只复制顶层 canonical `host.js`/`client.js`，不再把旧 `lib/` 快照回灌到部署目录；移除运行代码中的本机绝对路径。⑤ 修复子进程失败时的二次 `outcome` 异常，返回可读错误。
+- **v61（整段识别中 UI 精简 + 三项根治，已部署 ✅）**：① **识别中不再渲染波形图**——波形仅录音中显示（实时红色短波形），点击停止进入识别后输入栏恢复干净（只留状态文案 + 🎤⚙，不再被 24 段跳动波形拉宽延伸）；② **识别状态精简**——始终「正在识别…」，仅当已用时间超过 5 秒才追加「（已用 Ns）」（去掉了原来的「音频 Xs，已用 Ys」长文案）。③ **首句丢失根治**——VAD 校准期不再丢弃音频（静音块进 pre-roll 缓冲，开口立即结束校准用默认基线；原 v26 逻辑「开麦即开口」时反复重置并丢弃，首句整段丢失）；④ **重复/错位根治**——`commitChunk` 改为按上一块文本在最新草稿中重定位插入点（AI 精修/外部改动后自愈），渲染重置时不再清空重定位锚点并把插入点锚定到草稿末尾（原 bug：精修改草稿后插入点失效 → 前几次结果重复添加）；⑤ **换对话不再重新加载模型**——`resetWorker` 效果仅在引擎/模型真正变化时销毁 worker（原逻辑每次对话挂载都销毁，导致换对话后首次说话重新加载模型 38s）
 - **v60（界面中英文，已部署 ✅）**：新增**界面语言**偏好 `uiLang`（与识别语言 `lang` 独立，跨浏览器同步）——设置底部右侧改为**「中 | EN」两段式开关**，选中侧绿色高亮（高 18、内边距 6px）；**全界面文案双语化**（状态提示/按钮悬停/设置面板/引擎说明/API 配置等 ~60 处，经 `I18N` 字典 + `t(key, vars)` 助手）；英文界面下状态清理逻辑（聆听中/预热前缀判断）同步适配；识别语言仍由「语言」下拉独立控制（英文界面下识别中文不受影响）。**补充**：① 引擎加载期若检测到用户说话（VAD/响度触发），立即清除「聆听中…未识别到语音」误报；② **移除 v57 的「环境检测」折叠区**（用户要求，连同相关 I18N 键一并删除，按钮 tooltip 不再引用）
-- **v59（跨浏览器设置持久化，已部署 ✅）**：设置与 Key 从浏览器 localStorage 升级为 **Host 侧 `.voice-prefs.json`**（工作区根，任何浏览器共享——Chrome/Edge/豆包打开同一 dsh 看到同一份设置与 Key）；客户端启动时从服务端拉取合并（服务端优先），改动 400ms 防抖写回；服务端无数据时自动迁移当前 localStorage 设置。localStorage 降级为本地缓存（离线/服务不可用时不丢功能）。**隐私提示**：Key 明文存于本机工作区 `.voice-prefs.json`（与浏览器 localStorage 暴露面相当）；换机器不迁移。部署：lib/client.js + lib/index.js（Host 新增 Remote `getPrefs`/`setPrefs`，fs 服务读写）；备份于 `voice-input-plugin\.deploy-backup-2026-08-27\`
+- **v59（历史）**：首次加入 Host 侧 `.voice-prefs.json`；v62 将其移到稳定的 DSH 数据目录并补上原子写入、白名单、局部更新合并及失败可见性。**隐私提示**：Key 仍为本机明文文件，换机器不会自动迁移。
 - **v58（五件事）**：① **整段尾裁**——整段录音停止时裁剪尾部静音（与听写模式 v52 同款逻辑），缓解 whisper/FunASR 长静音尾部幻觉重复字并缩短识别耗时；`transcribe.py` FunASR 路径启用 `merge_vad=True, merge_length_silence=300`（合并 VAD 相邻短段消除段边界重复，实测长尾静音场景输出正确）；「正在识别…」提示带音频时长。② **精修配置说明**——AI精修配置区新增提示：Key 与 Prompt 仅保存在当前浏览器 localStorage，换浏览器/清缓存需重新填写（「消失」多为换浏览器所致）。③ **中英切换**——设置底部右侧按钮，点击在中文/English 间切换（联动「语言」下拉与浏览器实时识别；FunASR 固定中文禁用）。④ **浏览器适配**——识别 API 探测扩展（webkit/moz/ms/o 前缀 + 大小写兜底），环境检测显示实际探测到的 API 名；浏览器实时识别失败（网络重试耗尽/无服务/权限）时明确提示改用本地/云端引擎（不自动切换）。⑤ **预热如实提示**——预热文案按引擎显示真实预期（FunASR 实测冷加载 38-39s →「首次约 30-40 秒」，whisper 约 5-10 秒），预热上限 30s→60s（原 30s 会在正常加载中途误报超时）。⑥ **弹窗自适应高度**——设置面板最大高度按输入栏上方实际可用空间动态测量（原 `calc(100vh - 48px)` 低估，弹窗顶部会伸出屏幕导致顶部内容无法查看、滚动条不可用），打开时测量 + 窗口 resize 时重测
 - **v57（提示与超时四项优化）**：① **提示自动消失**——「已识别」「未识别到语音」「已停止」等成功/中性提示 3 秒后自动消失（错误提示保留）；② **无语音自动停止**——引擎就绪后连续 15 秒无语音自动停止并提示「未检测到语音，已自动停止」（预热期不计时；说话/文字上屏均重置计时；整段模式无语音且全程无声音时跳过转写直接结束）；③ **预热提示升级**——「本地引擎预热中…（已 N 秒，首次约 5-10 秒）」每 5s 刷新 + 完成后「引擎就绪」1.5s + 预热上限 30s（超时提示后仍可继续使用）；预热期间不再误显示「聆听中」；④ **环境检测**——设置面板新增折叠区，诊断 安全上下文/mediaDevices/AudioContext/SpeechRecognition 四项并给出缺失原因（豆包浏览器排查用），禁用按钮 tooltip 列出具体缺失项；另补上整段模式缺失的「聆听中…未识别到语音」提示。改动仅 client.js（纯前端），host.js/transcribe.py 不动
 - **v56（跨平台安装）**：新增 `setup.sh`（Linux/macOS 版安装脚本：建 venv + 装依赖 + 预下载 FunASR 模型 + DSH_VOICE_ROOT/海外镜像提示，参数 `-m/--mirror`、`--skip-models`）；`DISTRIBUTION.md` 新增「三-b、Linux/macOS 安装步骤」（setup.sh + 手动复制插件到 `~/.dsh/profiles/node_modules` + cordis.patch.yml 注册 + 重启）；功能全平台兼容（录音/whisper/FunASR/云后端无平台限制，Host 已按 POSIX 路径自适应），macOS 麦克风授权与 Linux 音频服务注意事项已写入文档
@@ -28,8 +30,8 @@
 - **v39（说明文案 + 质量生效范围）**：折叠说明文案更新——「本地 whisper：语言最多（openai）」「本地FunASR：中文最好（阿里）」「AI精修：语音输出后两秒AI纠错」「整段：输入完毕后整体识别，关闭后实时识别（误差更大）」。**质量（beam）仅在「本地 base whisper」生效**（faster-whisper 解码束宽 1=快速/5=高质量）；浏览器内置 ASR / FunASR / 云 ASR 无此参数——**禁用并显示「不适用」**（此前 auto/funasr/cloud 虽已禁用但显示的是束宽数字，易误导）
 - **v38（引擎改名 + 可折叠说明）**：引擎选项更名——「自动」→「浏览器内置 ASR 识别」；「本地引擎（免费·离线）」→「本地 base whisper」；「FunASR 中文（本地·ONNX）」→「FunASR 中文本地」。底部原长段说明改为**可折叠「引擎说明」**（默认收起）：四行引擎对比 + 三行功能说明（浏览器内置：最轻最快（自带）/ 本地 whisper：语言最多 / FunASR：中文最好 / 云 ASR：外部大模型，需 API / 标点 / AI精修 / 整段），hover 有补充来源；「清除保存的 Key」按钮常驻折叠区外
 - **v37（FunASR 中文引擎 + 可移植化）**：
-  1. **新增 FunASR 引擎**（阿里达摩院开源 paraformer-zh，ONNX 本地推理、**无 torch**）：设置浮层「识别引擎」新增「FunASR 中文（本地·ONNX）」。中文识别明显优于 faster-whisper base/small，自带 VAD 切句与标点（ct-punc），实测 6.5s 音频预热后单块识别 **~270ms**（whisper base 同段音频返回空结果）。模型（paraformer ~450MB + vad ~30MB + punc ~450MB）首次使用自动下载（ModelScope → `<root>\.modelscope`），选引擎即后台预热（对齐 v29 预热机制，`warm` 按 backend=funasr 路由）；实时听写与整段模式均可用；UI 联动：模型固定 paraformer-zh、语言固定中文、质量项禁用
-  2. **可移植化重构（为打包分发）**：Host 不再依赖硬编码路径——`DSH_VOICE_ROOT`（根目录）/ `DSH_VOICE_PYTHON`（解释器）环境变量优先，旧路径仅兜底；Windows/POSIX 路径自适应（`.venv\Scripts` vs `bin`）；`DSH_HF_ENDPOINT` 可换 HF 镜像（默认仍 hf-mirror）；ModelScope 缓存默认入工作区（`MODELSCOPE_CACHE` + `MODELSCOPE_HOME`，后者必须可写否则 SDK 报 WinError 5）；新增 `setup.ps1`（建 venv + 装依赖 + 可选预下载模型，pip 缓存固定 `.pip-cache`）与 `requirements.txt`（faster-whisper/httpx/funasr-onnx/funasr-onnx-automodel/onnxruntime）；分发说明见 `DISTRIBUTION.md`
+  1. **新增 FunASR 引擎**（阿里达摩院开源 paraformer-zh，ONNX 本地推理、**无 torch**）：设置浮层「识别引擎」新增「FunASR 中文（本地·ONNX）」。中文识别明显优于 faster-whisper base/small，自带 VAD 切句与标点（ct-punc），实测 6.5s 音频预热后单块识别 **~270ms**（whisper base 同段音频返回空结果）。模型（paraformer ~450MB + vad ~30MB + punc ~450MB）按需下载（ModelScope → `<模型目录>\.modelscope`），选引擎即后台预热（对齐 v29 预热机制，`warm` 按 backend=funasr 路由）；实时听写与整段模式均可用；UI 联动：模型固定 paraformer-zh、语言固定中文、质量项禁用
+  2. **可移植化重构（为打包分发）**：Host 不再依赖硬编码路径——`DSH_VOICE_ROOT`（根目录）/ `DSH_VOICE_PYTHON`（解释器）环境变量优先，未设置时按 DSH 工作区与当前进程目录解析；Windows/POSIX 路径自适应（`.venv\Scripts` vs `bin`）；`DSH_HF_ENDPOINT` 可换 HF 镜像（默认仍 hf-mirror）；ModelScope 缓存默认入模型目录（`MODELSCOPE_CACHE` + `MODELSCOPE_HOME`，后者必须可写否则 SDK 报 WinError 5）；新增 `setup.ps1`（建 venv + 装依赖，默认不下载模型；`-WithModels` 才预下载，pip 缓存固定 `.pip-cache`）与 `requirements.txt`（faster-whisper/httpx/funasr-onnx/funasr-onnx-automodel/onnxruntime）；分发说明见 `DISTRIBUTION.md`
   3. 依赖注意：funasr-onnx 强制 `numpy<=1.26.4`（faster-whisper 兼容）；jieba 仅 sdist（19MB 字典），构建需 setuptools（`--no-build-isolation` 或等其自动装）；pip 缓存目录必须可写（沙箱/受限环境请用 `--cache-dir` 指向工作区）
 - **v36（整段模式文案精简）**：移除整段模式录音期间的「整段录音中…（再次点击停止）」状态文案（占位且多余——🎤 红点脉冲 + 实时红色短波形已足够反馈）；本地引擎预热提示仍按原逻辑短暂显示后自动清除；停止后「正在识别…」、错误/结果提示均不变
 - **v35（整段识别模式，可选）**：设置浮层新增「整段」开关（持久化 `batchMode`）。开启后 🎤 行为改变：① 点击开始——**持续监听、不切块、不上屏**（实时红色短波形，v36 起无状态文案）；② 再次点击停止——把整段音频一次送识别（状态「正在识别…」+ 已录音频的 24 段短波形跳动动画，每 5s 刷新已耗时）；③ 识别完成插入光标处，**立即** AI 精修（语流已结束，不走 2s 合并窗口；因 `commitChunk` 后 draftRef 未及重渲染，先同步 `lastCommittedRef.draft` 再 `flushPolish`，区间校验仍保护用户编辑）；④ AUTO 开启时识别完成后自动发送。实现：新增 `startBatchCapture`（ScriptProcessor 全量录音 + ~80ms 间隔实时电平上报）与 `startBatch`/`stopBatch`（**停止时不自增会话代际**，保证识别结果落定；识别期间重新开始录音则旧结果作废）；>10 分钟录音拒绝（RPC 载荷过大）。配套 Host：worker 请求超时 90s→300s、一次性兜底 graceMs 180s→300s（长音频识别耗时线性增长）。**注意**：整段模式无论引擎选择均走媒体采集；「自动」引擎在整段模式下改用本地识别后端（浏览器实时 API 无整体识别能力）
@@ -75,19 +77,20 @@
 
 | 组件 | 路径 | 说明 |
 |---|---|---|
-| ASR 脚本 | `D:\Codex\dsh语音输入\.voice-asr\transcribe.py` | 多后端调度器（probe/local/openai） |
-| Python 环境 | `D:\Codex\dsh语音输入\.venv\` | faster-whisper + edge-tts |
-| 模型缓存 | `D:\Codex\dsh语音输入\.hf\` | whisper base（hf-mirror 下载） |
+| ASR 脚本 | `<仓库根>\.voice-asr\transcribe.py` | 多后端调度器（probe/local/openai） |
+| Python 环境 | `<仓库根>\.venv\` | faster-whisper + FunASR ONNX |
+| 模型缓存 | 默认 `<模型目录>\.hf` / `<模型目录>\.modelscope` | 模型按需下载；目录可在设置中更改 |
+| 跨浏览器设置 | `DSH_VOICE_DATA_ROOT` 指向的 `.voice-prefs.json` | 默认 `<DSH_HOME>\voice-input` 或用户目录 `.dsh\voice-input` |
 | 云端 Key（可选） | 环境变量 `DSH_ASR_API_KEY` / `DSH_ASR_BASE_URL` | OpenAI 兼容端点 |
 
-## 四、部署级持久化（重启不丢）——已完成 ✅
+## 四、部署级持久化（重启不丢）——v62 工作区待部署
 
-状态：**已部署**（2026-08-18，已验证 Host 模块可从部署目录加载）。
+状态：**工作区与分发副本已更新，外部 DSH profiles 未写入**。部署前请备份 `cordis.patch.yml` 并获得明确批准。
 
 | 项 | 位置 |
 |---|---|
-| 插件包（真实拷贝） | `C:\Users\catsk\.dsh\profiles\node_modules\dsh-plugin-voice-input\` |
-| 组合注册 | `C:\Users\catsk\.dsh\profiles\web\cordis.patch.yml`（`id: voice-input`，已追加） |
+| 插件包（真实拷贝） | `<DSH>\profiles\node_modules\dsh-plugin-voice-input\` |
+| 组合注册 | `<DSH>\profiles\web\cordis.patch.yml`（`id: voice-input`） |
 | 备份 | `cordis.patch.yml.bak-20260818-002526` |
 | 同步脚本 | 本目录 `deploy.ps1`（版本更新后运行 `pwsh -File deploy.ps1` 重新同步） |
 
@@ -99,7 +102,7 @@
   经 `dsh-typert-protocol` 的 `@Remote` 机制暴露给浏览器
 - Client 半区：`lib/client.js` = `window.__ModuleLoader__.load` 模块格式，
   经 `ctx.remote.voice.*` 调用 Host（替代动态版的 `host.call`），样式经 document 注入
-- 配置/Key 仍存 localStorage（`dsh.voice.prefs.v1`），重启不丢
+- 配置/Key 由 Host 存入 DSH 数据目录 `.voice-prefs.json`（可用 `DSH_VOICE_DATA_ROOT` 指定），浏览器 localStorage 仅作离线缓存；重启和换浏览器不丢
 
 **重启后**：插件随 DSH 自动加载（无需批准），与动态版功能一致。
 **注意**：动态会话版（vmic-1）与静态部署版不能同时挂载（重复注册同一槽位），

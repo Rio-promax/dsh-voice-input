@@ -1,7 +1,10 @@
 // 语音输入插件 Host 半区（静态部署版，Remote 服务 "voice"）
-// 部署方式：junction 到 C:\Users\catsk\.dsh\profiles\node_modules\dsh-plugin-voice-input
-// 并在 profiles\web\cordis.patch.yml 注册 id: voice-input
+// Host half of the DSH voice-input plugin.  The package is copied into a DSH
+// profile by install.ps1; the ASR workspace is resolved at runtime through
+// DSH_VOICE_ROOT or the active DSH workspace (never a machine-specific path).
 import { Remote, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 // ---- decorator emulation (standard TS transpile output pattern) ----
 var __runInitializers = function (thisArg, initializers, value) {
@@ -42,50 +45,163 @@ var __esDecorate = function (ctor, descriptorIn, decorators, contextIn, initiali
   done = true;
 };
 
-// v37 可移植化：DSH_VOICE_ROOT 显式指定工作区根（优先级高于 sandboxPolicy.workspaceRoot，
-// 未设置时回退到会话工作区，最后兼容本机旧部署路径）；DSH_VOICE_PYTHON 显式指定 python
-// 可执行文件（未设置时用 <root>\.venv 内解释器，Windows Scripts / POSIX bin 自适应）。
+// v62：根目录与数据目录均可移植化。DSH_VOICE_ROOT 指向包含 .voice-asr
+// 与 .venv 的运行根；未设置时优先使用 DSH workspace，再回退到当前进程目录。
+// DSH_VOICE_DATA_ROOT 指向跨浏览器设置目录；未设置时使用 DSH_HOME/.dsh 下的
+// voice-input 子目录。DSH_VOICE_PYTHON 可显式指定 Python。
 const _win = () => typeof process !== "undefined" && process.platform === "win32";
+const sep = () => _win() ? "\\" : "/";
 const py = (root) => {
   if (typeof process !== "undefined" && process.env && process.env.DSH_VOICE_PYTHON) return process.env.DSH_VOICE_PYTHON;
-  const sep = _win() ? "\\" : "/";
-  return root + sep + ".venv" + sep + (_win() ? "Scripts" : "bin") + sep + "python" + (_win() ? ".exe" : "");
+  const s = sep();
+  return root + s + ".venv" + s + (_win() ? "Scripts" : "bin") + s + "python" + (_win() ? ".exe" : "");
 };
-const script = (root) => root + (_win() ? "\\" : "/") + ".voice-asr" + (_win() ? "\\" : "/") + "transcribe.py";
+const script = (root) => path.join(root, ".voice-asr", "transcribe.py");
+const PREFS_FILE = ".voice-prefs.json";
+const PREF_KEYS = [
+  "engine", "asrProvider", "model", "lang", "beam", "usePunct", "aiPolish",
+  "polishPrompt", "polishContext", "batchMode", "asrKey", "asrBaseUrl",
+  "deepseekKey", "deepseekBaseUrl", "volcAppId", "volcAccessToken", "volcCluster",
+  "uiLang", "modelRoot",
+];
+
+function envValue(name) {
+  try {
+    const value = process && process.env ? process.env[name] : "";
+    return typeof value === "string" && value.trim() ? value.trim() : "";
+  } catch (e) { return ""; }
+}
+
+function pathValue(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 1024 || /[\x00-\x1f]/.test(trimmed)) return "";
+  return trimmed;
+}
+
+function sanitizePrefs(input) {
+  const out = {};
+  if (!input || typeof input !== "object" || Array.isArray(input)) return out;
+  for (const key of PREF_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(input, key)) continue;
+    const value = input[key];
+    if (typeof value === "string") {
+      // Prompt and endpoint fields are user-editable, but avoid accidental
+      // multi-megabyte payloads being written by an RPC caller.
+      if (value.length > (key === "polishPrompt" ? 12000 : 4096)) continue;
+      out[key] = value;
+    } else if (typeof value === "number" || typeof value === "boolean") {
+      out[key] = value;
+    }
+  }
+  return out;
+}
 
 async function resolveRoot(ctx) {
   const candidates = [];
-  if (typeof process !== "undefined" && process.env && process.env.DSH_VOICE_ROOT) candidates.push(process.env.DSH_VOICE_ROOT);
+  const explicit = envValue("DSH_VOICE_ROOT");
+  if (explicit) candidates.push(explicit);
   try {
     const p = ctx.get("sandboxPolicy");
     if (p && typeof p.workspaceRoot === "string" && p.workspaceRoot) candidates.push(p.workspaceRoot);
   } catch (e) {}
-  candidates.push("D:\\Codex\\dsh语音输入");
-  const fs = ctx.get("fs");
-  if (fs && typeof fs.stat === "function") {
-    for (const c of candidates) {
-      try {
-        const target = await fs.resolve(c + (_win() ? "\\" : "/") + ".voice-asr" + (_win() ? "\\" : "/") + "transcribe.py");
-        const info = await fs.stat(target);
-        if (info) return c;
-      } catch (e) {}
-    }
+  try {
+    if (typeof process !== "undefined" && process.cwd) candidates.push(process.cwd());
+  } catch (e) {}
+  const unique = [];
+  for (const candidate of candidates) {
+    const value = pathValue(candidate);
+    if (value && !unique.includes(value)) unique.push(value);
   }
-  return candidates[0];
+  for (const candidate of unique) {
+    try {
+      const info = await fs.stat(path.join(candidate, ".voice-asr", "transcribe.py"));
+      if (info && info.isFile && info.isFile()) return candidate;
+    } catch (e) {}
+  }
+  // Keep a deterministic fallback so the caller can return a useful
+  // "script not found" message instead of throwing while resolving paths.
+  return unique[0] || ".";
 }
 
-async function runPython(ctx, argv, stdinData, envExtra) {
+async function resolveDataRoot(ctx) {
+  const explicit = envValue("DSH_VOICE_DATA_ROOT");
+  if (explicit) return path.resolve(explicit);
+  const dshHome = envValue("DSH_HOME");
+  if (dshHome) return path.resolve(dshHome, "voice-input");
+  const userHome = envValue("USERPROFILE") || envValue("HOME");
+  if (userHome) return path.resolve(userHome, ".dsh", "voice-input");
+  const root = await resolveRoot(ctx);
+  return path.resolve(root, ".voice-data");
+}
+
+async function prefsPath(ctx) {
+  const root = await resolveDataRoot(ctx);
+  await fs.mkdir(root, { recursive: true });
+  return path.join(root, PREFS_FILE);
+}
+
+async function readStoredModelRoot(ctx) {
+  try {
+    const filename = await prefsPath(ctx);
+    const raw = await fs.readFile(filename, "utf8");
+    const parsed = JSON.parse(raw);
+    return pathValue(parsed && parsed.modelRoot);
+  } catch (e) {
+    try {
+      const legacy = path.join(await resolveRoot(ctx), PREFS_FILE);
+      const raw = await fs.readFile(legacy, "utf8");
+      const parsed = JSON.parse(raw);
+      return pathValue(parsed && parsed.modelRoot);
+    } catch (legacyError) { return ""; }
+  }
+}
+
+async function resolveModelRoot(ctx, requested, root) {
+  // An explicitly supplied empty string means "use the workspace default".
+  // This is distinct from an omitted argument, which should honor the stored
+  // preference/environment for legacy callers and background probes.
+  if (requested !== undefined && requested !== null) {
+    const explicit = pathValue(requested);
+    return explicit ? (path.isAbsolute(explicit) ? path.resolve(explicit) : path.resolve(root, explicit)) : path.resolve(root);
+  }
+  const value = await readStoredModelRoot(ctx) || envValue("DSH_MODEL_ROOT");
+  if (!value) return path.resolve(root);
+  // Relative paths are portable within the ASR workspace; absolute paths are
+  // respected so a user can put large models on another drive.
+  return path.isAbsolute(value) ? path.resolve(value) : path.resolve(root, value);
+}
+
+function modelEnv(root, modelRoot) {
+  return {
+    DSH_VOICE_ROOT: root,
+    DSH_MODEL_ROOT: modelRoot,
+    HF_HOME: path.join(modelRoot, ".hf"),
+    MODELSCOPE_CACHE: path.join(modelRoot, ".modelscope"),
+    MODELSCOPE_HOME: path.join(modelRoot, ".modelscope-home"),
+  };
+}
+
+async function runPython(ctx, argv, stdinData, envExtra, options) {
   const sp = ctx.get("subprocess");
   if (!sp || typeof sp.spawn !== "function") {
     return { ok: false, error: "子进程服务不可用" };
   }
   let root;
   try {
-    root = await resolveRoot(ctx);
+    root = pathValue(options && options.root) || await resolveRoot(ctx);
   } catch (e) {
     return { ok: false, error: "定位工作区失败: " + String((e && e.message) || e) };
   }
-  const env = { HF_HOME: root + (_win() ? "\\" : "/") + ".hf" };
+  try {
+    const info = await fs.stat(script(root));
+    if (!info || (info.isFile && !info.isFile())) return { ok: false, error: "未找到语音识别脚本，请设置 DSH_VOICE_ROOT" };
+  } catch (e) {
+    return { ok: false, error: "未找到语音识别脚本，请设置 DSH_VOICE_ROOT" };
+  }
+  const hasRequestedModelRoot = !!(options && Object.prototype.hasOwnProperty.call(options, "modelRoot"));
+  const modelRoot = await resolveModelRoot(ctx, hasRequestedModelRoot ? options.modelRoot : undefined, root);
+  const env = modelEnv(root, modelRoot);
   if (envExtra) for (const k in envExtra) if (envExtra[k]) env[k] = envExtra[k];
   let handle;
   try {
@@ -132,9 +248,10 @@ async function runPython(ctx, argv, stdinData, envExtra) {
  * worker is disposed and the one-shot spawn path is used as fallback.
  */
 class LocalWorker {
-  constructor(ctx, root) {
+  constructor(ctx, root, modelRoot) {
     this.ctx = ctx;
     this.root = root;
+    this.modelRoot = modelRoot || root;
     this.handle = null;
     this.seq = 0;
     this.buf = "";
@@ -149,7 +266,7 @@ class LocalWorker {
       cwd: this.root,
       stdio: { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
       graceMs: 5000,
-      env: { HF_HOME: this.root + (_win() ? "\\" : "/") + ".hf" },
+      env: modelEnv(this.root, this.modelRoot),
     });
     this.handle = handle;
     this.buf = "";
@@ -239,7 +356,7 @@ class LocalWorker {
       py(this.root), script(this.root),
       "--backend", backend, "--model", args.model || (backend === "funasr" ? "paraformer-zh" : "base"),
       "--lang", args.lang || "zh", "--beam", String(args.beam || 1),
-    ], args.wavBase64);
+    ], args.wavBase64, null, { root: this.root, modelRoot: this.modelRoot });
     if (r2.outcome && r2.outcome.exitCode === 0 && r2.out) {
       return { ok: true, text: r2.out };
     }
@@ -348,9 +465,11 @@ let VoiceGateway = (() => {
     }
     /** List available ASR backends and polish availability. */
     async listBackends() {
-      const r = await runPython(this.ctx, [py(await resolveRoot(this.ctx)), script(await resolveRoot(this.ctx)), "--probe"]);
-      if (r.outcome.exitCode !== 0) {
-        return { ok: false, error: "探测后端失败: " + (r.err || r.out || ("退出码 " + r.outcome.exitCode)) };
+      const root = await resolveRoot(this.ctx);
+      const r = await runPython(this.ctx, [py(root), script(root), "--probe"], null, null, { root });
+      if (!r || !r.outcome || r.outcome.exitCode !== 0) {
+        const code = r && r.outcome && typeof r.outcome.exitCode !== "undefined" ? "退出码 " + r.outcome.exitCode : "服务不可用";
+        return { ok: false, error: "探测后端失败: " + ((r && (r.err || r.out || r.error)) || code) };
       }
       try {
         const parsed = JSON.parse(r.out);
@@ -360,14 +479,21 @@ let VoiceGateway = (() => {
       }
     }
     /** List local model download state. */
-    async listModels() {
+    async listModels(args) {
       const root = await resolveRoot(this.ctx);
-      const r = await runPython(this.ctx, [py(root), script(root), "--list-models"]);
-      if (r.outcome.exitCode !== 0) {
-        return { ok: false, error: "查询模型失败: " + (r.err || r.out || ("退出码 " + r.outcome.exitCode)) };
+      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, root);
+      const r = await runPython(this.ctx, [py(root), script(root), "--list-models"], null, null, { root, modelRoot });
+      if (!r || !r.outcome || r.outcome.exitCode !== 0) {
+        const code = r && r.outcome && typeof r.outcome.exitCode !== "undefined" ? "退出码 " + r.outcome.exitCode : "服务不可用";
+        return { ok: false, error: "查询模型失败: " + ((r && (r.err || r.out || r.error)) || code) };
       }
       try {
-        return JSON.parse(r.out);
+        const result = JSON.parse(r.out);
+        if (result && typeof result === "object") {
+          result.modelRoot = modelRoot;
+          result.defaultModelRoot = path.resolve(root);
+        }
+        return result;
       } catch (e) {
         return { ok: false, error: "模型列表输出格式错误" };
       }
@@ -379,9 +505,16 @@ let VoiceGateway = (() => {
         return { ok: false, error: "未指定模型" };
       }
       const root = await resolveRoot(this.ctx);
-      const r = await runPython(this.ctx, [py(root), script(root), "--download", model]);
-      if (r.outcome.exitCode !== 0) {
-        return { ok: false, error: "模型下载失败: " + (r.err || r.out || ("退出码 " + r.outcome.exitCode)) };
+      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, root);
+      try {
+        await fs.mkdir(modelRoot, { recursive: true });
+      } catch (e) {
+        return { ok: false, error: "模型目录不可写，请更换保存位置" };
+      }
+      const r = await runPython(this.ctx, [py(root), script(root), "--download", model], null, null, { root, modelRoot });
+      if (!r || !r.outcome || r.outcome.exitCode !== 0) {
+        const code = r && r.outcome && typeof r.outcome.exitCode !== "undefined" ? "退出码 " + r.outcome.exitCode : "服务不可用";
+        return { ok: false, error: "模型下载失败: " + ((r && (r.err || r.out || r.error)) || code) };
       }
       try {
         return JSON.parse(r.out);
@@ -398,8 +531,14 @@ let VoiceGateway = (() => {
       const backend = (args && args.backend === "funasr") ? "funasr" : "local";
       const model = (args && args.model) || (backend === "funasr" ? "paraformer-zh" : "base");
       const root = await resolveRoot(this.ctx);
+      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, root);
+      try { await fs.mkdir(modelRoot, { recursive: true }); } catch (e) { return { ok: false, error: "模型目录不可写，请更换保存位置" }; }
       try {
-        if (!this._localWorker) this._localWorker = new LocalWorker(this.ctx, root);
+        if (this._localWorker && this._localWorker.modelRoot !== modelRoot) {
+          this._localWorker.dispose();
+          this._localWorker = null;
+        }
+        if (!this._localWorker) this._localWorker = new LocalWorker(this.ctx, root, modelRoot);
         const r = await this._localWorker.warm(model, backend);
         if (r && r.ok === true) {
           return { ok: true, model, backend, cached: !!r.cached, ms: r.ms || 0 };
@@ -429,49 +568,67 @@ let VoiceGateway = (() => {
       }
     }
     /**
-     * v59: 跨浏览器设置持久化——读取 <root>/.voice-prefs.json。
-     * 文件不存在时返回空对象（客户端会把当前 localStorage 设置迁移上来）。
-     * 明文存储说明：与浏览器 localStorage 同等暴露（本机文件），README 有隐私提示。
+     * v62: 跨浏览器设置持久化。设置文件放在 DSH 数据目录，而不是当前
+     * 会话工作区；这样 Chrome/Edge/豆包等浏览器会共享同一份设置，工作区
+     * 变化也不会让 API Key 消失。明文存储风险在 README 中明确说明。
      */
     async getPrefs() {
-      const root = await resolveRoot(this.ctx);
-      const fs = this.ctx.get("fs");
-      if (!fs || typeof fs.readText !== "function") {
-        return { ok: false, error: "文件服务不可用" };
-      }
-      const sep = _win() ? "\\" : "/";
+      let target;
       try {
-        const target = await fs.resolve(root + sep + ".voice-prefs.json");
-        const info = await fs.stat(target);
-        if (!info) return { ok: true, prefs: {} };
-        const raw = await fs.readText(target);
+        target = await prefsPath(this.ctx);
+        const raw = await fs.readFile(target, "utf8");
         const parsed = JSON.parse(raw);
-        return { ok: true, prefs: (parsed && typeof parsed === "object") ? parsed : {} };
+        return { ok: true, prefs: sanitizePrefs(parsed) };
       } catch (e) {
-        return { ok: false, error: "读取设置失败: " + String((e && e.message) || e) };
+        if (e && e.code === "ENOENT") {
+          // v59 stored the file beside the ASR workspace.  Read it once as a
+          // migration source; the client will write the sanitized copy to the
+          // stable DSH data directory on the next sync.
+          try {
+            const legacy = path.join(await resolveRoot(this.ctx), PREFS_FILE);
+            if (!target || path.resolve(legacy) !== path.resolve(target)) {
+              const legacyRaw = await fs.readFile(legacy, "utf8");
+              return { ok: true, prefs: sanitizePrefs(JSON.parse(legacyRaw)), migrated: true };
+            }
+          } catch (legacyError) {}
+          return { ok: true, prefs: {} };
+        }
+        if (e instanceof SyntaxError) return { ok: false, error: "设置文件格式损坏，请在设置中重新保存" };
+        return { ok: false, error: "读取本机设置失败，请检查文件权限" };
       }
     }
     /**
-     * v59: 跨浏览器设置持久化——原子写入 <root>/.voice-prefs.json。
-     * 任何浏览器（Chrome/Edge/豆包等）共享同一份设置与 Key。
+     * v62: 原子写入设置，避免浏览器切换或 DSH 重启时留下半个 JSON 文件。
+     * 只保存白名单字段，并限制文本长度，避免 RPC 调用写入任意数据。
      */
     async setPrefs(args) {
-      const prefs = args && args.prefs;
-      if (!prefs || typeof prefs !== "object") {
+      const input = args && args.prefs;
+      if (!input || typeof input !== "object" || Array.isArray(input)) {
         return { ok: false, error: "设置数据无效" };
       }
-      const root = await resolveRoot(this.ctx);
-      const fs = this.ctx.get("fs");
-      if (!fs || typeof fs.writeText !== "function") {
-        return { ok: false, error: "文件服务不可用" };
-      }
-      const sep = _win() ? "\\" : "/";
+      const prefs = sanitizePrefs(input);
+      let temp = "";
       try {
-        const target = await fs.resolve(root + sep + ".voice-prefs.json");
-        await fs.writeText(target, JSON.stringify(prefs, null, 2));
+        const target = await prefsPath(this.ctx);
+        // RPC callers may send a patch rather than the complete client state.
+        // Merge only the whitelisted fields so a partial update cannot erase
+        // keys or model settings saved by another browser.
+        let current = {};
+        try {
+          const raw = await fs.readFile(target, "utf8");
+          current = sanitizePrefs(JSON.parse(raw));
+        } catch (readError) {
+          // Missing or malformed data is safe to replace with the sanitized
+          // patch; the next write restores a valid canonical JSON file.
+        }
+        const merged = Object.assign({}, current, prefs);
+        temp = target + ".tmp-" + process.pid + "-" + Date.now();
+        await fs.writeFile(temp, JSON.stringify(merged, null, 2) + "\n", "utf8");
+        await fs.rename(temp, target);
         return { ok: true };
       } catch (e) {
-        return { ok: false, error: "保存设置失败: " + String((e && e.message) || e) };
+        if (temp) { try { await fs.unlink(temp); } catch (cleanupError) {} }
+        return { ok: false, error: "保存本机设置失败，请检查文件权限" };
       }
     }
     /** Transcribe one base64 WAV via the selected backend. */
@@ -485,12 +642,18 @@ let VoiceGateway = (() => {
       const lang = (args && args.lang) || "zh";
       const beam = String((args && args.beam) || 1);
       const root = await resolveRoot(this.ctx);
+      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, root);
       if (backend === "local" || backend === "funasr") {
         // v26: persistent worker — model loads once per process, then each
         // chunk is ~0.3-2s instead of re-spawning python + reloading (3-10s).
         // v37: funasr 走同一 worker（serve 按 backend 路由加载 paraformer-zh）
         try {
-          if (!this._localWorker) this._localWorker = new LocalWorker(this.ctx, root);
+          await fs.mkdir(modelRoot, { recursive: true });
+          if (this._localWorker && this._localWorker.modelRoot !== modelRoot) {
+            this._localWorker.dispose();
+            this._localWorker = null;
+          }
+          if (!this._localWorker) this._localWorker = new LocalWorker(this.ctx, root, modelRoot);
           return await this._localWorker.transcribe({ wavBase64, model, lang, beam, backend });
         } catch (e) {
           return { ok: false, error: "本地识别服务失败: " + String((e && e.message) || e) };
@@ -509,9 +672,10 @@ let VoiceGateway = (() => {
       const r = await runPython(this.ctx, [
         py(root), script(root),
         "--backend", backend, "--model", model, "--lang", lang, "--beam", beam,
-      ], wavBase64, envExtra);
-      if (r.outcome.exitCode !== 0) {
-        return { ok: false, error: "识别失败（退出码 " + r.outcome.exitCode + "）：" + (r.err || r.out || "未知错误") };
+      ], wavBase64, envExtra, { root, modelRoot });
+      if (!r || !r.outcome || r.outcome.exitCode !== 0) {
+        const code = r && r.outcome && typeof r.outcome.exitCode !== "undefined" ? "退出码 " + r.outcome.exitCode : "服务不可用";
+        return { ok: false, error: "识别失败（" + code + "）：" + ((r && (r.err || r.out || r.error)) || "未知错误") };
       }
       if (!r.out) {
         return { ok: false, error: "识别未返回文本" + (r.err ? "（" + r.err + "）" : "") };
@@ -536,9 +700,11 @@ let VoiceGateway = (() => {
         context: (args && args.context) || "",
         prompt: (args && args.prompt) || "",
       });
-      const r = await runPython(this.ctx, [py(root), script(root), "--chat"], payload, envExtra);
-      if (r.outcome.exitCode !== 0) {
-        return { ok: false, error: "精修失败（退出码 " + r.outcome.exitCode + "）：" + (r.err || r.out || "未知错误") };
+      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, root);
+      const r = await runPython(this.ctx, [py(root), script(root), "--chat"], payload, envExtra, { root, modelRoot });
+      if (!r || !r.outcome || r.outcome.exitCode !== 0) {
+        const code = r && r.outcome && typeof r.outcome.exitCode !== "undefined" ? "退出码 " + r.outcome.exitCode : "服务不可用";
+        return { ok: false, error: "精修失败（" + code + "）：" + ((r && (r.err || r.out || r.error)) || "未知错误") };
       }
       if (!r.out) {
         return { ok: false, error: "精修未返回文本" + (r.err ? "（" + r.err + "）" : "") };

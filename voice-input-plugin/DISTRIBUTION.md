@@ -12,7 +12,7 @@
 | ASR 调度器 | `.voice-asr\transcribe.py` | 多后端调度（faster-whisper / FunASR / OpenAI 兼容 / 豆包 / DeepSeek 精修） |
 | Python 依赖 | `requirements.txt` | faster-whisper + httpx + FunASR ONNX（onnxruntime，**无 torch**） |
 | 安装脚本 | `setup.ps1`（Windows） | 建 venv → 装依赖 → 可选预下载 FunASR 模型 |
-| 模型缓存 | `<root>\.hf`（whisper）、`<root>\.modelscope`（FunASR） | 首次使用自动下载，**不随包分发** |
+| 模型缓存 | `<模型目录>\.hf`（whisper）、`<模型目录>\.modelscope`（FunASR） | 模型按需下载，目录可在设置中选择，**不随包分发** |
 
 ## 二、安装前提（使用者侧）
 
@@ -25,10 +25,12 @@
 
 ```powershell
 # 1. 克隆/复制整个工作区（含 .voice-asr、voice-input-plugin）
-# 2. 安装依赖（可加 -Mirror 指定 pip 镜像，如清华源）
+# 2. 安装依赖（默认不下载模型；可加 -Mirror 指定 pip 镜像）
 pwsh -File voice-input-plugin\setup.ps1 -Mirror https://pypi.tuna.tsinghua.edu.cn/simple
-#    -WithPunctuation  额外下载 FunASR 标点模型（中文标点更佳）
-#    -SkipModels       跳过 FunASR 模型预下载（首次识别时自动下载）
+#    -WithModels       明确预下载 FunASR ASR + VAD 模型
+#    -ModelRoot E:\DSH\models  把预下载模型放到指定目录
+#    -WithPunctuation  预下载时额外加入 FunASR 标点模型（中文标点更佳）
+#    -SkipModels       兼容旧参数，跳过模型预下载
 # 3. 部署插件（注册进 dsh 组合）
 pwsh -File voice-input-plugin\deploy.ps1
 # 4. 重启 DSH
@@ -44,7 +46,7 @@ Linux/macOS 使用 `setup.sh` + 手动部署：
 ```bash
 # 1. 安装依赖（可选 -m 指定 pip 镜像）
 bash voice-input-plugin/setup.sh -m https://pypi.tuna.tsinghua.edu.cn/simple
-#    --skip-models  跳过 FunASR 模型预下载（首次识别时自动下载）
+#    --skip-models  兼容旧参数，跳过模型预下载（模型在设置中按需下载）
 
 # 2. 手动部署插件到 dsh profiles（无 install.ps1，Linux 版手动完成）
 mkdir -p ~/.dsh/profiles/node_modules/dsh-plugin-voice-input/lib
@@ -68,25 +70,27 @@ Linux 需 PulseAudio/PipeWire 正常工作。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `DSH_VOICE_ROOT` | 会话工作区 → 旧版兜底路径 | 语音组件根目录（含 `.voice-asr`、`.venv`） |
+| `DSH_VOICE_ROOT` | 会话工作区 → 当前进程目录 | 语音组件根目录（含 `.voice-asr`、`.venv`） |
 | `DSH_VOICE_PYTHON` | `<root>\.venv\Scripts\python.exe`（Windows）/ `bin/python` | 指定 Python 解释器 |
+| `DSH_VOICE_DATA_ROOT` | `DSH_HOME\voice-input` 或用户目录 `.dsh\voice-input` | 跨浏览器设置文件 `.voice-prefs.json` 的目录 |
+| `DSH_MODEL_ROOT` | `<root>` | 预留的模型根目录环境变量；UI/安装参数优先 |
 | `DSH_HF_ENDPOINT` | `https://hf-mirror.com` | HuggingFace 镜像；海外用户设 `https://huggingface.co` |
-| `HF_HOME` | `<root>\.hf` | whisper 模型缓存 |
-| `MODELSCOPE_CACHE` | `<root>\.modelscope` | FunASR 模型缓存 |
+| `HF_HOME` | `<模型目录>\.hf` | whisper 模型缓存（Host 会按 UI 目录注入） |
+| `MODELSCOPE_CACHE` | `<模型目录>\.modelscope` | FunASR 模型缓存（Host 会按 UI 目录注入） |
 | `DSH_ASR_API_KEY` / `DSH_ASR_BASE_URL` | — | OpenAI 兼容云 ASR |
 | `DSH_DEEPSEEK_API_KEY` | — | AI 精修（DeepSeek） |
 | `DSH_VOLC_APPID` / `DSH_VOLC_ACCESS_TOKEN` | — | 豆包（火山引擎） |
 
-> 兼容性：旧版硬编码的 `D:\Codex\dsh语音输入` 仅作为最后兜底保留，新部署请通过环境变量或工作区根目录解析（不再依赖写死的绝对路径）。
+> 兼容性：不再包含任何个人机器的硬编码路径。新部署请通过 `DSH_VOICE_ROOT` 或 DSH 当前工作区解析；若找不到 `.voice-asr\transcribe.py`，界面会显示可读的本地环境错误。
 
 ## 五、必须告知使用者的限制与提示（文档/README 文案）
 
 1. **隐私与数据流向**
    - 本地识别（faster-whisper / FunASR）：音频**不出本机**。
    - 云 ASR（OpenAI 兼容 / 豆包）与 AI 精修（DeepSeek）：会把音频/文本发送给对应第三方服务。
-   - API Key 明文存储在浏览器 localStorage（`dsh.voice.prefs.v1`），仅保存在使用者自己机器上；**分发方不得内置任何 Key**。
+   - API Key 明文存储在本机 Host 数据目录 `.voice-prefs.json`（`DSH_VOICE_DATA_ROOT` 可指定），localStorage 只作离线缓存；仅保存在使用者自己机器上，**分发方不得内置任何 Key**。
 2. **HTTPS 要求**：浏览器录音（getUserMedia）仅在 **HTTPS 或 localhost** 下可用；远程部署必须配置 HTTPS，否则麦克风按钮不可用（界面会提示）。
-3. **首次下载**：选择 FunASR 或本地 whisper 引擎后，首次识别需下载模型（数百 MB 至数 GB），期间界面提示"本地引擎预热中…"；建议用 `setup.ps1` 预下载。
+3. **按需下载**：安装本体与 Python 依赖不会自动下载大模型；在「设置 → 本地模型管理」中选择目录后点击「下载」，或显式运行 `setup.ps1 -WithModels`。首次识别前可能需要等待模型下载/预热（数百 MB 至数 GB）。
 4. **资源占用**：本地模型常驻内存约 1GB（FunASR）~1.5GB（whisper medium 以上）；整段模式单次识别数分钟音频时 CPU 占用持续数秒至数分钟。
 5. **功能边界**：FunASR 仅普通话；whisper 多语言；整段模式录音上限 10 分钟；云 ASR 一句话识别有服务商自身限制。
 6. **许可合规（可商用，但需保留署名/许可声明）**：
@@ -105,6 +109,6 @@ Linux 需 PulseAudio/PipeWire 正常工作。
 
 ## 六、打包建议
 
-- 插件本体可发布为 npm 包（`package.json` 已含 `exports["./client"]` 与 `dsh.client` 声明）；模型与 venv **不随包分发**（体积与再分发许可考虑），由 `setup.ps1` 首次安装。
+- 插件本体可发布为 npm 包（`package.json` 已含 `exports["./client"]` 与 `dsh.client` 声明）；模型与 venv **不随包分发**（体积与再分发许可考虑），由设置面板或显式安装参数按需下载。
 - 组合注册：`deploy.ps1` 幂等追加 `cordis.patch.yml` 的 `voice-input` 行（只增改自己的 insert 区块，勿整体覆盖共享 patch 文件）。
 - 跨平台：`transcribe.py` 与 Host 路径处理已按 Windows/POSIX 自适应（`.venv\Scripts` vs `.venv\bin`）；`setup.ps1` 仅 Windows，Linux/macOS 使用者按 requirements.txt 手动建 venv 即可。

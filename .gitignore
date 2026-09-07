@@ -4,6 +4,7 @@
 .modelscope/
 .modelscope-home/
 .pip-cache/
+.voice-prefs.json
 
 # 部署副本与日志
 lib/

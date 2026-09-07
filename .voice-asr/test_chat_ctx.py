@@ -2,11 +2,12 @@
 import json
 import os
 import sys
+from pathlib import Path
 from unittest import mock
 
 os.environ["DSH_DEEPSEEK_API_KEY"] = "fake-key-for-test"
 os.environ["DSH_DEEPSEEK_BASE_URL"] = "http://127.0.0.1:1"
-sys.path.insert(0, r"D:\Codex\dsh语音输入\.voice-asr")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import transcribe as t
 
 captured = {}
