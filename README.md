@@ -1,11 +1,13 @@
 # DSH 语音输入插件
 
-在 DSH 输入栏直接语音输入文字：支持实时听写和整段录音，识别引擎可选浏览器内置 ASR、本地 whisper、FunASR 或云服务，识别后还可以使用 AI 精修。
+在 DSH 输入栏直接语音输入文字：支持实时听写和整段录音，识别引擎可选浏览器内置 ASR、本地 whisper、FunASR 或云服务，AI 精修功能、自动添加标点支持开启或者关闭。
 
-当前对外版本：1.1（设置跨浏览器持久化、模型目录可选、模型按需下载、安装/部署入口统一）。
+设置跨浏览器持久化、多引擎、多模型模型可选、UI清晰简便，同步显示波形图，满足你的多种需求。
 
 [![License](https://img.shields.io/github/license/Rio-promax/dsh-voice-input)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/Rio-promax/dsh-voice-input)](https://github.com/Rio-promax/dsh-voice-input/releases)
+
+
+
 
 ## 功能
 
@@ -15,9 +17,31 @@
 - **AI 精修**：可配置 AI 后台修正同音字、标点，并参考最近聊天语境。
 - **本地离线**：本地引擎无需 API 费用，模型按需下载。
 
-## 位置预览
+## 使用说明
 
-<img width="1562" height="190" alt="DSH 语音输入工具栏" src="https://github.com/user-attachments/assets/ee8b6673-806b-4b24-a6de-42ff3d46aa6d" />
+- 点击 🎤 开始录音，再点击一次停止。
+- 打开 ⚙ 设置识别引擎、模型、语言、标点、AI 精修、语境和整段模式。
+- 在“本地模型管理”中查看和下载模型；绿点表示模型已下载。
+- 浏览器内置 ASR 最轻量；本地 whisper 支持多语言；FunASR 更适合中文。
+
+
+  
+## 下载
+### 推荐：Git 克隆
+
+~~~bash
+git clone https://github.com/Rio-promax/dsh-voice-input.git
+cd dsh-voice-input
+~~~
+
+## 体验预览
+
+<img width="1506" height="258" alt="image" src="https://github.com/user-attachments/assets/ddeb6159-99e4-431c-ad92-39883d4bf74b" />
+<img width="538" height="208" alt="image" src="https://github.com/user-attachments/assets/5054898e-3b1d-456f-9492-9922029e7de0" />
+<img width="686" height="988" alt="image" src="https://github.com/user-attachments/assets/944a0104-24d1-4ccf-9406-badf9344f962" />
+
+
+
 
 ## 安装前提
 
@@ -346,12 +370,6 @@ Chrome 的完整说明见 [Google Chrome：使用摄像头和麦克风](https://
 - **未找到麦克风设备**：检查系统声音输入设备、耳机或摄像头是否已连接。
 - **麦克风被占用**：关闭 Zoom、Teams、录音软件或其他正在使用麦克风的程序后重试。
 
-## 使用
-
-- 点击 🎤 开始录音，再点击一次停止。
-- 打开 ⚙ 设置识别引擎、模型、语言、标点、AI 精修、语境和整段模式。
-- 在“本地模型管理”中查看和下载模型；绿点表示模型已下载。
-- 浏览器内置 ASR 最轻量；本地 whisper 支持多语言；FunASR 更适合中文。
 
 ## 环境变量
 
