@@ -2,7 +2,7 @@
 
 在 DSH 输入框里直接说话，自动变成文字。支持实时听写、整段录音、本地离线识别和 AI 精修。
 
-当前稳定版：**v1.1**
+当前稳定版：**v1.2.0**
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/Rio-promax/dsh-voice-input" alt="License" height="20"></a>
@@ -35,66 +35,23 @@
 - **中英文界面**：设置面板可在中文和 English 之间切换。
 - **设置自动保存**：引擎、模型和常用开关会保存在本机，重启或更换浏览器后仍可使用。
 
-## 下载
+## 安装
 
-### 推荐：下载稳定版
+Windows、macOS 和 Linux 使用同一条命令：
 
-前往 [Releases 页面](https://github.com/Rio-promax/dsh-voice-input/releases)，下载最新版本的 ZIP 压缩包。
+```bash
+npx @deepseek-ai/dsh plugin --profile web add dsh-plugin-voice-input
+```
 
-稳定版经过版本整理，更适合普通用户长期使用。下载完成后请先**完整解压**，不要直接在压缩包内运行安装脚本。
+安装完成后重启 DSH：
 
-### 想体验最新改动
+```bash
+npx @deepseek-ai/dsh web
+```
 
-也可以下载 [main 分支 ZIP](https://github.com/Rio-promax/dsh-voice-input/archive/refs/heads/main.zip)，但其中可能包含尚未发布的改动。
+输入框右侧出现 **🎤** 和 **⚙**，就表示安装成功。浏览器识别无需下载模型；第一次选择本地 Whisper 或 FunASR 时，插件会先征求确认，再安装本地运行组件和所选模型。
 
-## Windows 安装
-
-开始前只需确认两件事：
-
-- DSH 至少成功启动过一次。
-- 电脑已安装 Python 3.9 或更高版本。
-
-然后按下面三步操作：
-
-1. 完整解压下载的 ZIP。
-2. 在解压后的文件夹中打开 PowerShell，运行：
-
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\install.ps1
-   ```
-
-3. 看到“安装完成”后，重新启动 DSH：
-
-   ```powershell
-   npx @deepseek-ai/dsh web
-   ```
-
-输入框右侧出现 **🎤** 和 **⚙**，就表示安装成功。
-
-安装脚本会自动复制并注册插件，同时准备本地识别需要的 Python 环境。它默认不会预先下载大模型，因此首次安装更轻；当你在设置中选择本地模型并点击下载时，模型只需下载一次，以后会直接复用。
-
-## macOS 安装
-
-开始前请确认 DSH 至少成功启动过一次，并且电脑已安装 Python 3.9 或更高版本。
-
-1. 从 [Releases 页面](https://github.com/Rio-promax/dsh-voice-input/releases) 下载最新稳定版并完整解压。
-2. 打开“终端”，输入 `cd `（末尾留一个空格），把解压后的文件夹拖进终端窗口，然后按回车。
-3. 运行下面的命令，准备本地识别环境：
-
-   ```bash
-   bash ./voice-input-plugin/setup.sh
-   ```
-
-4. 按照[苹果电脑插件安装步骤](voice-input-plugin/DISTRIBUTION.md#三-b安装步骤linux--macos)完成插件复制与注册。
-5. 启动 DSH：
-
-   ```bash
-   npx @deepseek-ai/dsh web
-   ```
-
-首次点击麦克风时，macOS 会询问是否允许浏览器使用麦克风，请选择“允许”。输入框右侧出现 **🎤** 和 **⚙**，就表示安装成功。
-
-> macOS 当前还没有和 Windows 相同的一键安装脚本，因此第 4 步需要粘贴一次部署命令。后续正常使用不需要重复安装。
+源码与历史版本仍可在 [Releases 页面](https://github.com/Rio-promax/dsh-voice-input/releases) 下载。
 
 ## 怎么使用
 
@@ -149,7 +106,7 @@ macOS 如果没有出现授权窗口，请打开“系统设置 → 隐私与安
 
 ## 系统支持
 
-Windows 提供一键安装脚本。macOS 和 Linux 也可以使用，但目前需要额外的命令行操作，详见[高级安装与维护说明](voice-input-plugin/DISTRIBUTION.md)。
+Windows、macOS 和 Linux 均支持 npm 一行安装；本地识别需要 Python 3.9 或更高版本。
 
 ## License
 

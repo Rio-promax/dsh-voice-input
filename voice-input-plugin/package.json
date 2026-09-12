@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-voice-input",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "DSH voice input plugin: browser realtime + VAD dictation + local/cloud ASR + DeepSeek AI polish",
   "license": "MIT",
   "type": "module",
@@ -11,9 +11,37 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib"
+    "lib",
+    "python",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepack": "node scripts/prepack.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rio-promax/dsh-voice-input.git"
+  },
+  "homepage": "https://github.com/Rio-promax/dsh-voice-input#readme",
+  "bugs": {
+    "url": "https://github.com/Rio-promax/dsh-voice-input/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "dsh-plugin",
+    "voice-input",
+    "speech-to-text",
+    "asr",
+    "whisper",
+    "funasr"
   ],
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "inject": [
@@ -23,6 +51,8 @@
     }
   },
   "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-typert-protocol": "^0.1.0-rc.6"
   }
 }

@@ -4,14 +4,15 @@
 
 ## 当前版本
 
-- 对外版本：**1.1**
-- 内部实现：**v62**
-- 状态：工作区源码与分发副本已同步；外部 DSH profiles 未自动写入
+- 对外版本：**1.2.0**
+- 内部实现：**v64**
+- 状态：npm 正式版 1.2.0
 - 插件 ID：动态调试版 `vmic-1`；静态安装包 `dsh-plugin-voice-input`
 
 ## 用户功能
 
 - 实时听写与整段录音
+- 实时识别收尾预留：点停止后 1~2 秒内的迟到结果仍会上屏（期间开启新会话则照整段识别作废）
 - 浏览器内置 ASR
 - 本地 Whisper 多语言识别
 - 本地 FunASR 中文识别
@@ -23,15 +24,13 @@
 
 ## 普通用户安装
 
-请查看仓库根目录的 `README.md`。Windows 用户只需在解压后的仓库根目录运行：
+请查看仓库根目录的 `README.md`。Windows、macOS 和 Linux 使用同一条安装命令：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+```bash
+npx @deepseek-ai/dsh plugin --profile web add dsh-plugin-voice-input
 ```
 
-安装完成后重启 DSH，输入栏右侧出现 **🎤** 和 **⚙** 即可使用。本地模型默认按需下载，无需在安装时预先选择模型或配置环境变量。
-
-macOS 用户先运行 `bash ./voice-input-plugin/setup.sh`，再按照 [DISTRIBUTION.md](DISTRIBUTION.md#三-b安装步骤linux--macos) 中的插件复制与注册步骤操作。首次使用时请允许浏览器访问麦克风。
+安装完成后重启 DSH，输入栏右侧出现 **🎤** 和 **⚙** 即可使用。首次选择本地引擎时，界面会征求确认并安装本地运行组件；模型继续按需下载。
 
 ## 文件说明
 

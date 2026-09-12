@@ -1,4 +1,9 @@
-// 语音输入插件 Client 半区（静态部署版 v62，模块加载器格式）
+// 语音输入插件 Client 半区（静态部署版 v63，模块加载器格式）
+// v63：实时识别「收尾预留」——点击停止后不再立刻 abort，而是只 stop() 让浏览器把
+// 尾部结果落定为 final，并保留 2s 收尾窗口：窗口内迟到的 final 与始终未落定的
+// interim 仍会上屏（与实时上屏路径一致，含 AI 精修）；窗口内开启新会话（实时/听写/
+// 整段任一）、用户在窗口内改动草稿（编辑或已发送）、组件卸载 → 一律抛弃收尾内容，
+// 与整段识别「新会话开启后旧会话结果作废」保持一致。
 // v62：设置跨浏览器持久化、模型缓存目录可选、安装/部署入口统一；
 // v61：整段识别中不再渲染波形图（波形仅录音中显示）；识别状态精简为「正在识别…」，
 // 仅超 5s 追加「（已用 Ns）」——避免识别时波形+长文案把输入栏拉宽延伸。
@@ -44,6 +49,8 @@ window.__ModuleLoader__.load({
             listBackends: () => call("listBackends"),
             listModels: (args) => call("listModels", args),
             downloadModel: (args) => call("downloadModel", args),
+            getEnvironment: () => call("getEnvironment"),
+            installEnvironment: (args) => call("installEnvironment", args),
             transcribe: (args) => call("transcribe", args),
             polish: (args) => call("polish", args),
             // v52：销毁常驻 worker（引擎切换/切到浏览器 ASR 或云 ASR 时释放内存）
@@ -189,6 +196,9 @@ window.__ModuleLoader__.load({
         const BATCH_SPEECH_LEVEL = 0.15     // 整段录音「有语音」判断（电平感知曲线下限）
         // v58：浏览器实时识别语言映射（stream 模式跟随「语言」设置；auto 不设置走浏览器默认）
         const STREAM_LANG_MAP = { zh: 'zh-CN', en: 'en-US', ja: 'ja-JP', ko: 'ko-KR' }
+        // v63：实时识别停止后的收尾预留窗口——浏览器迟到输出的 final / 未落定 interim
+        // 在此时长内仍会上屏；窗口内开启新会话则照整段识别作废。1~2s 为该值可调区间。
+        const STREAM_TAIL_GRACE_MS = 2000
 
         // v58：识别 API 探测扩展——webkit/moz/ms/o 前缀 + 大小写兜底扫描
         //（部分国产/小众浏览器暴露私有实现，主动适配）
@@ -357,6 +367,14 @@ window.__ModuleLoader__.load({
             'set.backendFail': '后端探测失败: {err}',
             'set.modelListFail': '无法获取本地模型状态',
             'set.downloadFail': '下载失败: {err}',
+            'set.localComponent': '本地识别组件',
+            'set.localReady': '已安装，可以使用本地识别',
+            'set.localLegacy': '已发现原有本地环境，将直接复用',
+            'set.localMissing': '使用本地识别前，需要安装一次运行组件',
+            'set.localInstall': '安装本地组件',
+            'set.localInstalling': '正在安装，请保持 DSH 运行…',
+            'set.localConfirm': '将安装本地识别运行组件。安装需要联网并占用约 700 MB 空间，是否继续？',
+            'set.localInstallFail': '本地组件安装失败: {err}',
             'err.unknown': '未知错误',
           },
           en: {
@@ -504,6 +522,14 @@ window.__ModuleLoader__.load({
             'set.backendFail': 'Backend probe failed: {err}',
             'set.modelListFail': 'Cannot fetch local model status',
             'set.downloadFail': 'Download failed: {err}',
+            'set.localComponent': 'Local recognition component',
+            'set.localReady': 'Installed and ready for local recognition',
+            'set.localLegacy': 'Existing local environment found and reused',
+            'set.localMissing': 'Install the runtime component once before using local recognition',
+            'set.localInstall': 'Install local component',
+            'set.localInstalling': 'Installing. Keep DSH running…',
+            'set.localConfirm': 'This installs the local recognition runtime. It requires internet access and about 700 MB of disk space. Continue?',
+            'set.localInstallFail': 'Local component installation failed: {err}',
             'err.unknown': 'Unknown error',
           },
         }
@@ -1054,6 +1080,11 @@ window.__ModuleLoader__.load({
           // v26：会话代际——startDict/startStream 递增，停止时递增作废所有在途回调
           const sessionRef = React.useRef(0)
           const polishPendingRef = React.useRef(null)
+          // v63：实时识别收尾预留窗口状态 { rec, timer, draft, own }
+          //   rec   停止后仍保留回调的识别对象（窗口结束或抛弃时才真正拆机）
+          //   draft 点击停止时的草稿快照；own 窗口内插件自己写入草稿的最新值
+          //   草稿既不等于 draft 也不等于 own ⇒ 用户在窗口内改动过（编辑/已发送/换对话）
+          const graceRef = React.useRef(null)
           // v29：本地引擎预热——model -> 'pending'|'done'|'failed'，以及按模型的在途 promise
           const warmStateRef = React.useRef({})
           const warmPendingRef = React.useRef({})
@@ -1067,6 +1098,13 @@ window.__ModuleLoader__.load({
             // v61：不再清空 lastChunkRef（保留重定位锚点）；插入点锚定到当前草稿末尾，
             // 避免后续块插入到 AI 精修/外部改动后的过期坐标（原 bug：重复/错位堆积）
             insPointRef.current = draft.length
+          }
+
+          // v63：插件自身写入草稿（上屏、AI 精修改字）时同步刷新收尾窗口快照，
+          // 避免把自己的写入误判成「用户改动」而白丢收尾内容。
+          const noteGraceDraft = (next) => {
+            const g = graceRef.current
+            if (g) g.own = next
           }
 
           React.useEffect(() => {
@@ -1239,6 +1277,7 @@ window.__ModuleLoader__.load({
               if (cur2.slice(start, end) === text) {
                 const next = cur2.slice(0, start) + r2.text + cur2.slice(end)
                 applyDraft(next)
+                noteGraceDraft(next) // v63：精修改字同样算插件自己的写入
                 restoreCaret(start + r2.text.length)
               }
             }).catch((err) => { setStatusSafe(t('status.polishFail', { err: fmtErr(err) })) })
@@ -1403,6 +1442,7 @@ window.__ModuleLoader__.load({
             lastCommittedRef.current = { draft: next, at: at2 }
             lastChunkRef.current = { start: at2 - sepR.length - chunk.length, text: chunk }
             a.setDraft(next)
+            noteGraceDraft(next) // v63：上屏同样算插件自己的写入
           }, [])
 
           // v52：清理整段模式残留——若整段采集未正常停止则先释放麦克风，
@@ -1418,12 +1458,61 @@ window.__ModuleLoader__.load({
             setRecognizing(false)
           }
 
+          // v63：收尾预留窗口收尾。
+          //   commit=true —— 窗口正常到点：把窗口内浏览器始终未落定为 final 的最后一段
+          //                  interim 补上屏（现在实现里 interim 本就不显示，这是「还有话
+          //                  没上屏」的主要来源），再落定精修、光标回位。
+          //   commit=false —— 立即抛弃：窗口内开启新会话 / 用户改动草稿 / 组件卸载，
+          //                  照整段识别的老规矩，旧会话在途结果一律作废。
+          // 两条路径都摘除回调、abort、代际 +1，窗口外的迟到事件不可能再上屏。
+          const closeStreamTail = React.useCallback((commit) => {
+            const g = graceRef.current
+            if (!g) return
+            graceRef.current = null
+            if (g.timer) { clearTimeout(g.timer); g.timer = null }
+            // 草稿被用户改动过（手动编辑 / 消息已发送 / 换了新对话）→ 即便到点也不补上屏。
+            // own 覆盖插件自己在窗口内的写入（上屏/精修），避免把自己的写入误判成用户改动。
+            const stale = draftRef.current !== g.draft && draftRef.current !== g.own
+            const leftover = (textRef.current || '').trim()
+            textRef.current = ''
+            if (commit && !stale && leftover) {
+              const chunk = (usePunctRef.current ? leftover : stripPunct(leftover)).trim()
+              if (chunk) {
+                commitChunk(chunk)
+                const lc = lastChunkRef.current
+                if (lc) queuePolish(lc.start, chunk)
+              }
+            }
+            sessionRef.current += 1 // v26：代际作废——窗口外迟到事件一律丢弃
+            const rec = g.rec
+            if (rec) {
+              try {
+                rec.onresult = null; rec.onerror = null; rec.onend = null
+                rec.stop && rec.stop()
+                rec.abort && rec.abort()
+              } catch (e) { console.error('closeStreamTail', e) }
+            }
+            if (commit) {
+              // v33：停止时落定挂起的精修窗口（最后一句也被精修，识别仍静默）
+              if (polishTimerRef.current) {
+                clearTimeout(polishTimerRef.current)
+                polishTimerRef.current = null
+                flushPolish()
+              }
+              polishPendingRef.current = null
+              // 用户已改动草稿时不再回位光标，避免打断正在进行的编辑
+              if (!stale) restoreCaret(insPointRef.current)
+            }
+          }, [commitChunk, stripPunct, queuePolish, flushPolish, restoreCaret])
+
           const startStream = React.useCallback((keepPoint) => {
             const a = actionsRef.current
             if (!streamSupported || !a) return
             if (recRef.current !== null) return
             // v52：进入实时模式前清理整段残留（未正常停止的整段采集/波形）
             clearBatchResidual()
+            // v63：开启新会话 → 立即抛弃上一次实时识别的收尾预留内容（与整段识别一致）
+            if (graceRef.current) closeStreamTail(false)
             const mySession = ++sessionRef.current
             autoStopRef.current = false
             const SR = window[detectSpeechRecognition()]
@@ -1447,6 +1536,10 @@ window.__ModuleLoader__.load({
             rec.onresult = (event) => {
               // v26：代际校验——停止后的迟到事件一律作废，防旧话串入新会话
               if (sessionRef.current !== mySession) return
+              // v63：收尾窗口内草稿已被用户改动（手动编辑 / 消息已发送 / 换了新对话）→
+              // 立即抛弃收尾，避免尾巴文字落进用户的新内容里
+              const gg = graceRef.current
+              if (gg && draftRef.current !== gg.draft && draftRef.current !== gg.own) { closeStreamTail(false); return }
               let finals = ''
               let interim = ''
               const start = (typeof event.resultIndex === 'number' && event.resultIndex > 0) ? event.resultIndex : 0
@@ -1527,23 +1620,26 @@ window.__ModuleLoader__.load({
             setIsError(false)
             startIdleHint(mySession)
             try { rec.start() } catch (e) { console.error('start', e); recRef.current = null; setListening(false); setIsError(true); setStatusSafe(t('status.startFailed')) }
-          }, [streamSupported, commitChunk, stripPunct, restoreCaret, queuePolish, startIdleHint, stopIdleHint])
+          }, [streamSupported, commitChunk, stripPunct, restoreCaret, queuePolish, startIdleHint, stopIdleHint, closeStreamTail])
 
           const teardownStream = React.useCallback(() => {
             userStoppedRef.current = true
             stopIdleHint()
-            // v26：代际递增作废迟到事件
-            sessionRef.current += 1
             const rec = recRef.current
             recRef.current = null
-            if (rec) {
-              try {
-                rec.onresult = null; rec.onerror = null; rec.onend = null
-                rec.stop && rec.stop()
-                rec.abort && rec.abort()
-              } catch (e) { console.error('teardown', e) }
-            }
             setListening(false)
+            if (rec) {
+              // v63：收尾预留——不再立刻 abort（abort 会丢弃浏览器尚未落定的最后一句）。
+              // 只 stop()：浏览器停止采集并把已收音的尾部结果落定为 final，随后 onend；
+              // 期间保留 onresult 进入收尾窗口，窗口内迟到的 final / 未落定 interim 仍上屏。
+              try { rec.stop && rec.stop() } catch (e) { console.error('stop stream', e) }
+              const g = { rec: rec, timer: null, draft: draftRef.current, own: null }
+              graceRef.current = g
+              g.timer = setTimeout(() => { closeStreamTail(true) }, STREAM_TAIL_GRACE_MS)
+            } else {
+              // v26：无活动识别对象时直接作废代际（保持旧行为）
+              sessionRef.current += 1
+            }
             // v33：停止时立即落定挂起的精修窗口（最后一句也被精修，识别仍静默）
             if (polishTimerRef.current) {
               clearTimeout(polishTimerRef.current)
@@ -1552,13 +1648,15 @@ window.__ModuleLoader__.load({
             }
             polishPendingRef.current = null
             restoreCaret(insPointRef.current)
-          }, [restoreCaret, stopIdleHint, flushPolish])
+          }, [restoreCaret, stopIdleHint, flushPolish, closeStreamTail])
 
           const startDict = React.useCallback(() => {
             const a = actionsRef.current
             if (!mediaSupported || !a || dictStopRef.current) return
             // v52：进入实时听写前清理整段残留（未正常停止的整段采集/波形）
             clearBatchResidual()
+            // v63：开启新会话 → 立即抛弃上一次实时识别的收尾预留内容（与整段识别一致）
+            if (graceRef.current) closeStreamTail(false)
             // v27：新会话代际——旧会话（含已停止但仍在途的请求）回调一律作废
             const mySession = ++sessionRef.current
             autoStopRef.current = false
@@ -1681,7 +1779,7 @@ window.__ModuleLoader__.load({
               })
             }
             beginDict()
-          }, [mediaSupported, commitChunk, stripPunct, queuePolish, warmLocal, startIdleHint, startWarmHint, armNoSpeech, flashStatus])
+          }, [mediaSupported, commitChunk, stripPunct, queuePolish, warmLocal, startIdleHint, startWarmHint, armNoSpeech, flashStatus, closeStreamTail])
 
           const stopDict = React.useCallback(() => {
             stopIdleHint()
@@ -1719,6 +1817,8 @@ window.__ModuleLoader__.load({
           const startBatch = React.useCallback(() => {
             const a = actionsRef.current
             if (!mediaSupported || !a || batchStopRef.current) return
+            // v63：开启新会话 → 立即抛弃上一次实时识别的收尾预留内容（与整段识别一致）
+            if (graceRef.current) closeStreamTail(false)
             const mySession = ++sessionRef.current
             autoStopRef.current = false
             const pre = prefsRef.current
@@ -1929,7 +2029,7 @@ window.__ModuleLoader__.load({
               else { setIsError(true); setStatusSafe(t('status.recogFail', { err: em })) }
               restoreCaret(insPointRef.current)
             })
-          }, [restoreCaret, stopIdleHint, commitChunk, flushPolish, stripPunct, flashStatus])
+          }, [restoreCaret, stopIdleHint, commitChunk, flushPolish, stripPunct, flashStatus, closeStreamTail])
 
           // v57：无语音计时触发时按当前模式调用对应停止函数（渲染时刷新，保证定时回调拿到最新闭包）
           stopActionRef.current = p.batchMode ? stopBatch : stopDict
@@ -1955,6 +2055,20 @@ window.__ModuleLoader__.load({
                 rec.stop && rec.stop()
                 rec.abort && rec.abort()
               } catch (e) {}
+            }
+            // v63：卸载时立即抛弃收尾预留窗口（不补上屏，也不碰草稿）
+            const g = graceRef.current
+            graceRef.current = null
+            if (g) {
+              if (g.timer) clearTimeout(g.timer)
+              const gr = g.rec
+              if (gr) {
+                try {
+                  gr.onresult = null; gr.onerror = null; gr.onend = null
+                  gr.stop && gr.stop()
+                  gr.abort && gr.abort()
+                } catch (e) {}
+              }
             }
             if (dictStopRef.current) {
               try { dictStopRef.current() } catch (e) {}
@@ -2043,6 +2157,8 @@ window.__ModuleLoader__.load({
           const [localModels, setLocalModels] = React.useState(null)
           const [modelErr, setModelErr] = React.useState('')
           const [downloading, setDownloading] = React.useState('')
+          const [environment, setEnvironment] = React.useState(null)
+          const [installingEnvironment, setInstallingEnvironment] = React.useState(false)
           const [modelRootDraft, setModelRootDraft] = React.useState(p.modelRoot || '')
           const syncError = usePrefsSync()
           // v38：引擎说明折叠区（每条 ≤20 字）
@@ -2088,6 +2204,15 @@ window.__ModuleLoader__.load({
           React.useEffect(() => {
             if (!p.settingsOpen) return
             const v = voiceRemote()
+            if (!v || typeof v.getEnvironment !== 'function') { setEnvironment({ ok: false, installed: false }); return }
+            let alive = true
+            v.getEnvironment().then((res) => { if (alive) setEnvironment(res && res.ok ? res : { ok: false, installed: false }) })
+              .catch(() => { if (alive) setEnvironment({ ok: false, installed: false }) })
+            return () => { alive = false }
+          }, [p.settingsOpen])
+          React.useEffect(() => {
+            if (!p.settingsOpen || !environment || !environment.installed) return
+            const v = voiceRemote()
             if (!v || typeof v.listModels !== 'function') { setModelErr(t('set.modelListFail')); return }
             let alive = true
             v.listModels({ modelRoot: p.modelRoot || '' }).then((res) => {
@@ -2096,7 +2221,7 @@ window.__ModuleLoader__.load({
               else setModelErr((res && res.error) || t('set.modelListFail'))
             }).catch((e) => { if (alive) setModelErr(t('set.modelListFail') + ': ' + fmtErr(e)) })
             return () => { alive = false }
-          }, [p.settingsOpen, p.modelRoot])
+          }, [p.settingsOpen, p.modelRoot, environment && environment.installed])
           React.useEffect(() => {
             setModelRootDraft(p.modelRoot || '')
           }, [p.modelRoot])
@@ -2113,6 +2238,32 @@ window.__ModuleLoader__.load({
                 setModelErr(t('set.downloadFail', { err: (res && res.error) || t('err.unknown') }))
               }
             }).catch((e) => { setDownloading(''); setModelErr(t('set.downloadFail', { err: String((e && e.message) || e) })) })
+          }
+          const doInstallEnvironment = () => {
+            const v = voiceRemote()
+            if (!v || typeof v.installEnvironment !== 'function' || installingEnvironment) return
+            if (!window.confirm(t('set.localConfirm'))) return
+            setInstallingEnvironment(true)
+            setModelErr('')
+            v.installEnvironment({ confirm: true }).then((res) => {
+              setInstallingEnvironment(false)
+              if (res && res.ok) {
+                setEnvironment(res)
+                setLocalModels(null)
+              } else {
+                setModelErr(t('set.localInstallFail', { err: (res && res.error) || t('err.unknown') }))
+              }
+            }).catch((e) => {
+              setInstallingEnvironment(false)
+              setModelErr(t('set.localInstallFail', { err: fmtErr(e) }))
+            })
+          }
+          const chooseEngine = (nextEngine) => {
+            prefs.set({ engine: nextEngine })
+            if ((nextEngine === 'local' || nextEngine === 'funasr') && environment && !environment.installed) {
+              setModelOpen(true)
+              doInstallEnvironment()
+            }
           }
           React.useEffect(() => {
             if (!apiOpen) return
@@ -2190,7 +2341,7 @@ window.__ModuleLoader__.load({
               React.createElement('button', { className: 'vi-pop-close', type: 'button', title: t('set.close'), onClick: () => prefs.set({ settingsOpen: false }) }, CLOSE_ICON)
             ),
             React.createElement('div', { className: 'vi-pop-grid' },
-              field(t('set.engine'), mkSel(p.engine, engineOptions, (v) => prefs.set({ engine: v }))),
+              field(t('set.engine'), mkSel(p.engine, engineOptions, chooseEngine)),
               // v42：云 ASR 模型由 API/服务商决定——仅「自定义」预设（openai + 空 BaseURL）可手填，
               // 其余预设（OpenAI 官方/Groq/硅基流动/智谱/豆包）只读展示「随服务商」
               field(t('set.model'), mkSel(
@@ -2294,6 +2445,17 @@ window.__ModuleLoader__.load({
             ),
             modelOpen
               ? React.createElement('div', { className: 'vi-set-field vi-set-wide' },
+                  React.createElement('span', null, t('set.localComponent')),
+                  environment && environment.installed
+                    ? React.createElement('div', { className: 'vi-set-hint' }, t(environment.reusedLegacy ? 'set.localLegacy' : 'set.localReady'))
+                    : React.createElement('div', { className: 'vi-set-field vi-set-wide' },
+                        React.createElement('div', { className: 'vi-set-hint' }, installingEnvironment ? t('set.localInstalling') : t('set.localMissing')),
+                        React.createElement('button', {
+                          className: 'vi-clear-btn', type: 'button',
+                          disabled: installingEnvironment || undefined,
+                          onClick: doInstallEnvironment,
+                        }, installingEnvironment ? t('set.localInstalling') : t('set.localInstall'))
+                      ),
                   // v62：模型缓存目录可由用户指定；空值保留旧版工作区默认目录。
                   field(t('set.modelPath'), React.createElement('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
                     mkInput(modelRootDraft, (v) => setModelRootDraft(v), t('set.modelPathPh')),
@@ -2312,7 +2474,7 @@ window.__ModuleLoader__.load({
                   localModels && localModels.modelRoot
                     ? React.createElement('div', { className: 'vi-set-hint' }, t('set.modelPathDefault', { path: localModels.modelRoot }))
                     : null,
-                  localModels
+                  environment && environment.installed && localModels
                     ? localModels.models
                         .filter((m) => p.engine === 'funasr' ? m.backend === 'funasr' : (p.engine === 'local' ? m.backend === 'local' : true))
                         .map((m) => React.createElement('div', { key: m.id, style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: 12 } },
@@ -2331,7 +2493,7 @@ window.__ModuleLoader__.load({
                               onClick: () => doDownload(m.id),
                             }, downloading === m.id ? t('set.downloading') : t('set.download'))
                       ))
-                    : React.createElement('div', { className: 'vi-set-hint' }, modelErr || t('set.loading')),
+                    : (environment && environment.installed ? React.createElement('div', { className: 'vi-set-hint' }, modelErr || t('set.loading')) : null),
                   modelErr ? React.createElement('div', { className: 'vi-set-hint', 'data-error': true }, modelErr) : null
                 )
               : null,

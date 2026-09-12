@@ -1,0 +1,3 @@
+- insert:
+    - id: voice-input
+      name: 'dsh-plugin-voice-input'

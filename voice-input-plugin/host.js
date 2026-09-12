@@ -5,6 +5,7 @@
 import { Remote, TypertRemoteService } from "@deepseek-ai/dsh-typert-protocol";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ---- decorator emulation (standard TS transpile output pattern) ----
 var __runInitializers = function (thisArg, initializers, value) {
@@ -51,12 +52,12 @@ var __esDecorate = function (ctor, descriptorIn, decorators, contextIn, initiali
 // voice-input 子目录。DSH_VOICE_PYTHON 可显式指定 Python。
 const _win = () => typeof process !== "undefined" && process.platform === "win32";
 const sep = () => _win() ? "\\" : "/";
-const py = (root) => {
-  if (typeof process !== "undefined" && process.env && process.env.DSH_VOICE_PYTHON) return process.env.DSH_VOICE_PYTHON;
+const venvPython = (root) => {
   const s = sep();
   return root + s + ".venv" + s + (_win() ? "Scripts" : "bin") + s + "python" + (_win() ? ".exe" : "");
 };
-const script = (root) => path.join(root, ".voice-asr", "transcribe.py");
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGE_ROOT = path.basename(MODULE_DIR).toLowerCase() === "lib" ? path.resolve(MODULE_DIR, "..") : MODULE_DIR;
 const PREFS_FILE = ".voice-prefs.json";
 const PREF_KEYS = [
   "engine", "asrProvider", "model", "lang", "beam", "usePunct", "aiPolish",
@@ -135,6 +136,40 @@ async function resolveDataRoot(ctx) {
   return path.resolve(root, ".voice-data");
 }
 
+async function isFile(filename) {
+  try {
+    const info = await fs.stat(filename);
+    return !!(info && info.isFile && info.isFile());
+  } catch (e) { return false; }
+}
+
+async function isDirectory(dirname) {
+  try {
+    const info = await fs.stat(dirname);
+    return !!(info && info.isDirectory && info.isDirectory());
+  } catch (e) { return false; }
+}
+
+// v64/npm：程序文件属于 npm 包，运行环境属于稳定的 DSH 数据目录。
+// 旧 DSH_VOICE_ROOT 仅作为已有 venv/模型缓存的兼容来源，不再承担包内脚本定位。
+async function resolveExecution(ctx) {
+  const legacyRoot = await resolveRoot(ctx);
+  const runtimeRoot = await resolveDataRoot(ctx);
+  const bundledScript = path.join(PACKAGE_ROOT, "python", "transcribe.py");
+  const bundledRequirements = path.join(PACKAGE_ROOT, "python", "requirements.txt");
+  const legacyScript = path.join(legacyRoot, ".voice-asr", "transcribe.py");
+  const explicitPython = envValue("DSH_VOICE_PYTHON");
+  const runtimePython = venvPython(runtimeRoot);
+  const legacyPython = venvPython(legacyRoot);
+  let python = explicitPython || "";
+  let reusedLegacy = false;
+  if (!python && await isFile(runtimePython)) python = runtimePython;
+  if (!python && await isFile(legacyPython)) { python = legacyPython; reusedLegacy = true; }
+  if (!python) python = _win() ? "python" : "python3";
+  const script = await isFile(bundledScript) ? bundledScript : legacyScript;
+  return { packageRoot: PACKAGE_ROOT, legacyRoot, runtimeRoot, python, runtimePython, legacyPython, script, requirements: bundledRequirements, reusedLegacy };
+}
+
 async function prefsPath(ctx) {
   const root = await resolveDataRoot(ctx);
   await fs.mkdir(root, { recursive: true });
@@ -157,19 +192,18 @@ async function readStoredModelRoot(ctx) {
   }
 }
 
-async function resolveModelRoot(ctx, requested, root) {
-  // An explicitly supplied empty string means "use the workspace default".
-  // This is distinct from an omitted argument, which should honor the stored
-  // preference/environment for legacy callers and background probes.
+async function resolveModelRoot(ctx, requested, legacyRoot, runtimeRoot) {
+  // Explicit paths remain user-owned. Empty/default requests reuse an existing
+  // legacy cache when present; only a genuinely fresh install starts under the
+  // stable DSH data directory, avoiding a multi-GB silent move between disks.
   if (requested !== undefined && requested !== null) {
     const explicit = pathValue(requested);
-    return explicit ? (path.isAbsolute(explicit) ? path.resolve(explicit) : path.resolve(root, explicit)) : path.resolve(root);
+    if (explicit) return path.isAbsolute(explicit) ? path.resolve(explicit) : path.resolve(runtimeRoot, explicit);
   }
   const value = await readStoredModelRoot(ctx) || envValue("DSH_MODEL_ROOT");
-  if (!value) return path.resolve(root);
-  // Relative paths are portable within the ASR workspace; absolute paths are
-  // respected so a user can put large models on another drive.
-  return path.isAbsolute(value) ? path.resolve(value) : path.resolve(root, value);
+  if (value) return path.isAbsolute(value) ? path.resolve(value) : path.resolve(runtimeRoot, value);
+  if (await isDirectory(path.join(legacyRoot, ".hf")) || await isDirectory(path.join(legacyRoot, ".modelscope"))) return path.resolve(legacyRoot);
+  return path.resolve(runtimeRoot, "models");
 }
 
 function modelEnv(root, modelRoot) {
@@ -187,27 +221,27 @@ async function runPython(ctx, argv, stdinData, envExtra, options) {
   if (!sp || typeof sp.spawn !== "function") {
     return { ok: false, error: "子进程服务不可用" };
   }
-  let root;
+  let execution;
   try {
-    root = pathValue(options && options.root) || await resolveRoot(ctx);
+    execution = (options && options.execution) || await resolveExecution(ctx);
   } catch (e) {
     return { ok: false, error: "定位工作区失败: " + String((e && e.message) || e) };
   }
   try {
-    const info = await fs.stat(script(root));
+    const info = await fs.stat(execution.script);
     if (!info || (info.isFile && !info.isFile())) return { ok: false, error: "未找到语音识别脚本，请设置 DSH_VOICE_ROOT" };
   } catch (e) {
     return { ok: false, error: "未找到语音识别脚本，请设置 DSH_VOICE_ROOT" };
   }
   const hasRequestedModelRoot = !!(options && Object.prototype.hasOwnProperty.call(options, "modelRoot"));
-  const modelRoot = await resolveModelRoot(ctx, hasRequestedModelRoot ? options.modelRoot : undefined, root);
-  const env = modelEnv(root, modelRoot);
+  const modelRoot = await resolveModelRoot(ctx, hasRequestedModelRoot ? options.modelRoot : undefined, execution.legacyRoot, execution.runtimeRoot);
+  const env = modelEnv(execution.runtimeRoot, modelRoot);
   if (envExtra) for (const k in envExtra) if (envExtra[k]) env[k] = envExtra[k];
   let handle;
   try {
     handle = sp.spawn({
       argv,
-      cwd: root,
+      cwd: execution.runtimeRoot,
       stdio: {
         stdin: stdinData ? { data: stdinData } : "ignore",
         stdout: { maxBytes: 65536 },
@@ -235,6 +269,91 @@ async function runPython(ctx, argv, stdinData, envExtra, options) {
   return { outcome, out, err };
 }
 
+async function runCommand(ctx, argv, cwd, graceMs) {
+  const sp = ctx.get("subprocess");
+  if (!sp || typeof sp.spawn !== "function") return { ok: false, error: "子进程服务不可用" };
+  let handle;
+  try {
+    handle = sp.spawn({
+      argv,
+      cwd,
+      stdio: { stdin: "ignore", stdout: { maxBytes: 65536 }, stderr: { maxBytes: 65536 } },
+      graceMs: graceMs || 600000,
+      env: {},
+    });
+    const outcome = await handle.done;
+    const out = handle.collected && handle.collected.stdout ? handle.collected.stdout.readFrom(0).text.trim() : "";
+    const err = handle.collected && handle.collected.stderr ? handle.collected.stderr.readFrom(0).text.trim() : "";
+    return { ok: outcome && outcome.exitCode === 0, outcome, out, err };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+async function findSystemPython(ctx, cwd) {
+  const candidates = _win() ? [["py", "-3"], ["python"]] : [["python3"], ["python"]];
+  for (const prefix of candidates) {
+    const result = await runCommand(ctx, prefix.concat(["--version"]), cwd, 30000);
+    if (result.ok) return prefix;
+  }
+  return null;
+}
+
+async function transcribeOpenAI(args, wavBase64, model, lang) {
+  const key = (args && args.apiKey) || process.env.DSH_ASR_API_KEY;
+  if (!key) return { ok: false, error: "未填写云识别 API Key" };
+  const base = ((args && args.baseUrl) || process.env.DSH_ASR_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, "");
+  try {
+    const form = new FormData();
+    form.append("file", new Blob([Buffer.from(wavBase64, "base64")], { type: "audio/wav" }), "audio.wav");
+    form.append("model", model || "whisper-1");
+    form.append("response_format", "json");
+    if (lang && lang !== "auto") form.append("language", lang);
+    const response = await fetch(base + "/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + key },
+      body: form,
+      signal: AbortSignal.timeout(120000),
+    });
+    const raw = await response.text();
+    if (!response.ok) return { ok: false, error: "云识别服务返回错误（HTTP " + response.status + "）：" + raw.slice(0, 300) };
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return { ok: false, error: "云识别返回数据格式错误" }; }
+    const text = String((parsed && parsed.text) || "").trim();
+    return text ? { ok: true, text } : { ok: false, error: "云识别未返回文本" };
+  } catch (e) {
+    return { ok: false, error: "云识别请求失败（网络错误）：" + String((e && e.message) || e) };
+  }
+}
+
+async function transcribeVolc(args, wavBase64) {
+  const appid = (args && args.volcAppId) || process.env.DSH_VOLC_APPID;
+  const token = (args && args.volcAccessToken) || process.env.DSH_VOLC_ACCESS_TOKEN;
+  const cluster = (args && args.volcCluster) || process.env.DSH_VOLC_CLUSTER || "volcengine_input_common";
+  if (!appid || !token) return { ok: false, error: "未填写豆包 AppID / Access Token" };
+  try {
+    const response = await fetch("https://openspeech.bytedance.com/api/v3/auc", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        app: { appid, token, cluster },
+        user: { uid: "dsh-voice-input" },
+        audio: { format: "wav", rate: 16000, bits: 16, channel: 1, data: wavBase64 },
+        request: { model_name: "bigmodel", enable_punc: true, enable_itn: true, language: "zh-CN" },
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+    const raw = await response.text();
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return { ok: false, error: "豆包返回数据格式错误：" + raw.slice(0, 300) }; }
+    if (!response.ok || parsed.code !== 0) return { ok: false, error: "豆包识别失败（错误码 " + (parsed.code ?? response.status) + "）：" + String(parsed.message || raw).slice(0, 300) };
+    const text = typeof parsed.result === "string" ? parsed.result.trim() : "";
+    return text ? { ok: true, text } : { ok: false, error: "豆包未返回识别结果" };
+  } catch (e) {
+    return { ok: false, error: "豆包识别请求失败（网络错误）：" + String((e && e.message) || e) };
+  }
+}
+
 /**
  * Persistent local-ASR worker (v26). Spawns `transcribe.py --serve` once and
  * keeps it alive: the faster-whisper model is loaded ONCE per process, so a
@@ -248,10 +367,11 @@ async function runPython(ctx, argv, stdinData, envExtra, options) {
  * worker is disposed and the one-shot spawn path is used as fallback.
  */
 class LocalWorker {
-  constructor(ctx, root, modelRoot) {
+  constructor(ctx, execution, modelRoot) {
     this.ctx = ctx;
-    this.root = root;
-    this.modelRoot = modelRoot || root;
+    this.execution = execution;
+    this.root = execution.runtimeRoot;
+    this.modelRoot = modelRoot || execution.runtimeRoot;
     this.handle = null;
     this.seq = 0;
     this.buf = "";
@@ -262,7 +382,7 @@ class LocalWorker {
     const sp = this.ctx.get("subprocess");
     if (!sp || typeof sp.spawn !== "function") return null;
     const handle = sp.spawn({
-      argv: [py(this.root), script(this.root), "--serve"],
+      argv: [this.execution.python, this.execution.script, "--serve"],
       cwd: this.root,
       stdio: { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
       graceMs: 5000,
@@ -353,10 +473,10 @@ class LocalWorker {
     // 下一块即恢复 ~1s 速度（否则会每块都走 3-10s 的一次性路径）。
     this._request({ op: "load", backend, model: args.model || (backend === "funasr" ? "paraformer-zh" : "base") }).catch(() => {})
     const r2 = await runPython(this.ctx, [
-      py(this.root), script(this.root),
+      this.execution.python, this.execution.script,
       "--backend", backend, "--model", args.model || (backend === "funasr" ? "paraformer-zh" : "base"),
       "--lang", args.lang || "zh", "--beam", String(args.beam || 1),
-    ], args.wavBase64, null, { root: this.root, modelRoot: this.modelRoot });
+    ], args.wavBase64, null, { execution: this.execution, modelRoot: this.modelRoot });
     if (r2.outcome && r2.outcome.exitCode === 0 && r2.out) {
       return { ok: true, text: r2.out };
     }
@@ -389,6 +509,8 @@ let VoiceGateway = (() => {
   let _listBackends_decorators;
   let _listModels_decorators;
   let _downloadModel_decorators;
+  let _getEnvironment_decorators;
+  let _installEnvironment_decorators;
   let _warm_decorators;
   let _transcribe_decorators;
   let _polish_decorators;
@@ -415,6 +537,18 @@ let VoiceGateway = (() => {
       __esDecorate(this, null, _downloadModel_decorators, {
         kind: "method", name: "downloadModel", static: false, private: false,
         access: { has: (obj) => "downloadModel" in obj, get: (obj) => obj.downloadModel },
+        metadata: _metadata,
+      }, null, _instanceExtraInitializers);
+      _getEnvironment_decorators = [Remote("getEnvironment")];
+      __esDecorate(this, null, _getEnvironment_decorators, {
+        kind: "method", name: "getEnvironment", static: false, private: false,
+        access: { has: (obj) => "getEnvironment" in obj, get: (obj) => obj.getEnvironment },
+        metadata: _metadata,
+      }, null, _instanceExtraInitializers);
+      _installEnvironment_decorators = [Remote("installEnvironment")];
+      __esDecorate(this, null, _installEnvironment_decorators, {
+        kind: "method", name: "installEnvironment", static: false, private: false,
+        access: { has: (obj) => "installEnvironment" in obj, get: (obj) => obj.installEnvironment },
         metadata: _metadata,
       }, null, _instanceExtraInitializers);
       _warm_decorators = [Remote("warm")];
@@ -465,8 +599,17 @@ let VoiceGateway = (() => {
     }
     /** List available ASR backends and polish availability. */
     async listBackends() {
-      const root = await resolveRoot(this.ctx);
-      const r = await runPython(this.ctx, [py(root), script(root), "--probe"], null, null, { root });
+      const execution = await resolveExecution(this.ctx);
+      if (!await isFile(execution.python)) {
+        return { ok: true, backends: [
+          { id: "local", kind: "asr", available: false },
+          { id: "funasr", kind: "asr", available: false },
+          { id: "openai", kind: "asr", available: !!process.env.DSH_ASR_API_KEY },
+          { id: "volc", kind: "asr", available: !!(process.env.DSH_VOLC_APPID && process.env.DSH_VOLC_ACCESS_TOKEN) },
+          { id: "deepseek", kind: "polish", available: !!(process.env.DSH_DEEPSEEK_API_KEY || process.env.DEEPSEEK_API_KEY) },
+        ] };
+      }
+      const r = await runPython(this.ctx, [execution.python, execution.script, "--probe"], null, null, { execution });
       if (!r || !r.outcome || r.outcome.exitCode !== 0) {
         const code = r && r.outcome && typeof r.outcome.exitCode !== "undefined" ? "退出码 " + r.outcome.exitCode : "服务不可用";
         return { ok: false, error: "探测后端失败: " + ((r && (r.err || r.out || r.error)) || code) };
@@ -480,9 +623,9 @@ let VoiceGateway = (() => {
     }
     /** List local model download state. */
     async listModels(args) {
-      const root = await resolveRoot(this.ctx);
-      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, root);
-      const r = await runPython(this.ctx, [py(root), script(root), "--list-models"], null, null, { root, modelRoot });
+      const execution = await resolveExecution(this.ctx);
+      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, execution.legacyRoot, execution.runtimeRoot);
+      const r = await runPython(this.ctx, [execution.python, execution.script, "--list-models"], null, null, { execution, modelRoot });
       if (!r || !r.outcome || r.outcome.exitCode !== 0) {
         const code = r && r.outcome && typeof r.outcome.exitCode !== "undefined" ? "退出码 " + r.outcome.exitCode : "服务不可用";
         return { ok: false, error: "查询模型失败: " + ((r && (r.err || r.out || r.error)) || code) };
@@ -491,7 +634,7 @@ let VoiceGateway = (() => {
         const result = JSON.parse(r.out);
         if (result && typeof result === "object") {
           result.modelRoot = modelRoot;
-          result.defaultModelRoot = path.resolve(root);
+          result.defaultModelRoot = path.resolve(execution.runtimeRoot, "models");
         }
         return result;
       } catch (e) {
@@ -504,14 +647,14 @@ let VoiceGateway = (() => {
       if (typeof model !== "string" || !model) {
         return { ok: false, error: "未指定模型" };
       }
-      const root = await resolveRoot(this.ctx);
-      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, root);
+      const execution = await resolveExecution(this.ctx);
+      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, execution.legacyRoot, execution.runtimeRoot);
       try {
         await fs.mkdir(modelRoot, { recursive: true });
       } catch (e) {
         return { ok: false, error: "模型目录不可写，请更换保存位置" };
       }
-      const r = await runPython(this.ctx, [py(root), script(root), "--download", model], null, null, { root, modelRoot });
+      const r = await runPython(this.ctx, [execution.python, execution.script, "--download", model], null, null, { execution, modelRoot });
       if (!r || !r.outcome || r.outcome.exitCode !== 0) {
         const code = r && r.outcome && typeof r.outcome.exitCode !== "undefined" ? "退出码 " + r.outcome.exitCode : "服务不可用";
         return { ok: false, error: "模型下载失败: " + ((r && (r.err || r.out || r.error)) || code) };
@@ -522,6 +665,38 @@ let VoiceGateway = (() => {
         return { ok: false, error: "模型下载输出格式错误" };
       }
     }
+    /** Report whether the local Python component is ready without changing disk state. */
+    async getEnvironment() {
+      const execution = await resolveExecution(this.ctx);
+      const installed = await isFile(execution.python);
+      return {
+        ok: true,
+        installed,
+        reusedLegacy: installed && execution.reusedLegacy,
+        runtimeRoot: execution.runtimeRoot,
+        python: installed ? execution.python : execution.runtimePython,
+      };
+    }
+    /** Install the local Python component after an explicit confirmation in the client UI. */
+    async installEnvironment(args) {
+      if (!args || args.confirm !== true) return { ok: false, error: "需要用户确认后才能安装本地组件" };
+      const execution = await resolveExecution(this.ctx);
+      if (await isFile(execution.python)) return { ok: true, installed: true, reusedLegacy: execution.reusedLegacy, python: execution.python };
+      if (!await isFile(execution.requirements)) return { ok: false, error: "安装清单缺失，请重新安装插件" };
+      try { await fs.mkdir(execution.runtimeRoot, { recursive: true }); } catch (e) { return { ok: false, error: "无法创建本地组件目录，请检查权限" }; }
+      const systemPython = await findSystemPython(this.ctx, execution.runtimeRoot);
+      if (!systemPython) return { ok: false, error: "未找到 Python 3.9 或更高版本，请先安装 Python" };
+      const create = await runCommand(this.ctx, systemPython.concat(["-m", "venv", path.join(execution.runtimeRoot, ".venv")]), execution.runtimeRoot, 180000);
+      if (!create.ok || !await isFile(execution.runtimePython)) return { ok: false, error: "创建 Python 环境失败: " + (create.err || create.out || create.error || "未知错误") };
+      const cacheDir = path.join(execution.runtimeRoot, ".pip-cache");
+      try { await fs.mkdir(cacheDir, { recursive: true }); } catch (e) {}
+      const install = await runCommand(this.ctx, [
+        execution.runtimePython, "-m", "pip", "install", "--disable-pip-version-check",
+        "--cache-dir", cacheDir, "--upgrade", "-r", execution.requirements,
+      ], execution.runtimeRoot, 900000);
+      if (!install.ok) return { ok: false, error: "安装本地识别组件失败: " + (install.err || install.out || install.error || "未知错误") };
+      return { ok: true, installed: true, reusedLegacy: false, python: execution.runtimePython };
+    }
     /**
      * v29: Prewarm the persistent local worker — loads `model` into memory so
      * the first real chunk skips the 3-10s model load. No-op cost when the
@@ -530,15 +705,15 @@ let VoiceGateway = (() => {
     async warm(args) {
       const backend = (args && args.backend === "funasr") ? "funasr" : "local";
       const model = (args && args.model) || (backend === "funasr" ? "paraformer-zh" : "base");
-      const root = await resolveRoot(this.ctx);
-      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, root);
+      const execution = await resolveExecution(this.ctx);
+      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, execution.legacyRoot, execution.runtimeRoot);
       try { await fs.mkdir(modelRoot, { recursive: true }); } catch (e) { return { ok: false, error: "模型目录不可写，请更换保存位置" }; }
       try {
         if (this._localWorker && this._localWorker.modelRoot !== modelRoot) {
           this._localWorker.dispose();
           this._localWorker = null;
         }
-        if (!this._localWorker) this._localWorker = new LocalWorker(this.ctx, root, modelRoot);
+        if (!this._localWorker) this._localWorker = new LocalWorker(this.ctx, execution, modelRoot);
         const r = await this._localWorker.warm(model, backend);
         if (r && r.ok === true) {
           return { ok: true, model, backend, cached: !!r.cached, ms: r.ms || 0 };
@@ -641,8 +816,10 @@ let VoiceGateway = (() => {
       const model = (args && args.model) || (backend === "funasr" ? "paraformer-zh" : "base");
       const lang = (args && args.lang) || "zh";
       const beam = String((args && args.beam) || 1);
-      const root = await resolveRoot(this.ctx);
-      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, root);
+      if (backend === "openai") return await transcribeOpenAI(args, wavBase64, model, lang);
+      if (backend === "volc") return await transcribeVolc(args, wavBase64);
+      const execution = await resolveExecution(this.ctx);
+      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, execution.legacyRoot, execution.runtimeRoot);
       if (backend === "local" || backend === "funasr") {
         // v26: persistent worker — model loads once per process, then each
         // chunk is ~0.3-2s instead of re-spawning python + reloading (3-10s).
@@ -653,34 +830,13 @@ let VoiceGateway = (() => {
             this._localWorker.dispose();
             this._localWorker = null;
           }
-          if (!this._localWorker) this._localWorker = new LocalWorker(this.ctx, root, modelRoot);
+          if (!this._localWorker) this._localWorker = new LocalWorker(this.ctx, execution, modelRoot);
           return await this._localWorker.transcribe({ wavBase64, model, lang, beam, backend });
         } catch (e) {
           return { ok: false, error: "本地识别服务失败: " + String((e && e.message) || e) };
         }
       }
-      const envExtra = {};
-      if (backend === "openai") {
-        if (args && args.apiKey) envExtra.DSH_ASR_API_KEY = args.apiKey;
-        if (args && args.baseUrl) envExtra.DSH_ASR_BASE_URL = args.baseUrl;
-      }
-      if (backend === "volc") {
-        if (args && args.volcAppId) envExtra.DSH_VOLC_APPID = args.volcAppId;
-        if (args && args.volcAccessToken) envExtra.DSH_VOLC_ACCESS_TOKEN = args.volcAccessToken;
-        if (args && args.volcCluster) envExtra.DSH_VOLC_CLUSTER = args.volcCluster;
-      }
-      const r = await runPython(this.ctx, [
-        py(root), script(root),
-        "--backend", backend, "--model", model, "--lang", lang, "--beam", beam,
-      ], wavBase64, envExtra, { root, modelRoot });
-      if (!r || !r.outcome || r.outcome.exitCode !== 0) {
-        const code = r && r.outcome && typeof r.outcome.exitCode !== "undefined" ? "退出码 " + r.outcome.exitCode : "服务不可用";
-        return { ok: false, error: "识别失败（" + code + "）：" + ((r && (r.err || r.out || r.error)) || "未知错误") };
-      }
-      if (!r.out) {
-        return { ok: false, error: "识别未返回文本" + (r.err ? "（" + r.err + "）" : "") };
-      }
-      return { ok: true, text: r.out };
+      return { ok: false, error: "不支持的识别引擎" };
     }
     /** DeepSeek polish with surrounding draft + recent chat context. */
     async polish(args) {
@@ -688,7 +844,7 @@ let VoiceGateway = (() => {
       if (typeof text !== "string" || !text.trim()) {
         return { ok: false, error: "没有可精修的文本" };
       }
-      const root = await resolveRoot(this.ctx);
+      const execution = await resolveExecution(this.ctx);
       const envExtra = {};
       if (args && args.apiKey) envExtra.DSH_DEEPSEEK_API_KEY = args.apiKey;
       if (args && args.baseUrl) envExtra.DSH_DEEPSEEK_BASE_URL = args.baseUrl;
@@ -700,8 +856,8 @@ let VoiceGateway = (() => {
         context: (args && args.context) || "",
         prompt: (args && args.prompt) || "",
       });
-      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, root);
-      const r = await runPython(this.ctx, [py(root), script(root), "--chat"], payload, envExtra, { root, modelRoot });
+      const modelRoot = await resolveModelRoot(this.ctx, args && args.modelRoot, execution.legacyRoot, execution.runtimeRoot);
+      const r = await runPython(this.ctx, [execution.python, execution.script, "--chat"], payload, envExtra, { execution, modelRoot });
       if (!r || !r.outcome || r.outcome.exitCode !== 0) {
         const code = r && r.outcome && typeof r.outcome.exitCode !== "undefined" ? "退出码 " + r.outcome.exitCode : "服务不可用";
         return { ok: false, error: "精修失败（" + code + "）：" + ((r && (r.err || r.out || r.error)) || "未知错误") };
