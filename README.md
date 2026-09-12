@@ -1,5 +1,7 @@
 # DSH 语音输入插件
 
+[English](README.en.md) | 简体中文
+
 在 DSH 输入框里直接说话，自动变成文字。支持实时听写、整段录音、本地离线识别和 AI 精修。
 
 当前稳定版：**v1.2.0**
@@ -119,14 +121,14 @@ Windows、macOS 和 Linux 均支持 npm 一行安装；本地识别需要 Python
 
 This plugin adds voice input to the DSH composer. It supports realtime dictation, batch recording, local Whisper/FunASR, cloud ASR, and optional AI polishing.
 
-For the most reliable download, get the latest ZIP from [GitHub Releases](https://github.com/Rio-promax/dsh-voice-input/releases), extract it completely, and run the following command from the extracted folder:
+Windows, macOS, and Linux use the same installation command:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+```bash
+npx @deepseek-ai/dsh plugin --profile web add dsh-plugin-voice-input
 ```
 
 Restart DSH with `npx @deepseek-ai/dsh web`. Installation is complete when the **🎤** and **⚙** buttons appear beside the composer.
 
-Local models are downloaded only when you choose them. See the [advanced installation and maintenance guide](voice-input-plugin/DISTRIBUTION.md) for custom paths, mirrors, macOS/Linux setup, or manual deployment.
+Local components and models are installed only after you select a local engine and confirm the prompt. See the [full English guide](README.en.md) or the [advanced installation and maintenance guide](voice-input-plugin/DISTRIBUTION.md).
 
 </details>
